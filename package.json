@@ -10,7 +10,9 @@
     "update": "git pull && npm run build:full",
     "wolvenkit:source": "node tools/wolvenkit-source.mjs",
     "probe": "python -I tools/probe.py src/REDbridge/bin/Release/net10.0/REDbridge.exe",
-    "clean": "node tools/dotnet.mjs clean src/REDbridge/REDbridge.csproj -c Release -v q"
+    "clean": "node tools/dotnet.mjs clean src/REDbridge/REDbridge.csproj -c Release -v q",
+    "release:notes": "node tools/release-notes.mjs",
+    "release": "gh workflow run release.yml --ref main -f release=true"
   },
   "engines": {
     "node": ">=20"

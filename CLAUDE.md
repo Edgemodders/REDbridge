@@ -12,6 +12,12 @@ REDbridge is the .NET process that hosts WolvenKit's headless libraries and expo
 - **Next:** `project.pack` (build the `.archive` from a project; top priority), C3's `cr2w.getChunk` and `cr2w.patch`, then a `--serve` daemon mode on a named pipe rather than any tray UI (decided 2026-10-11).
 - Two machines push here: `git fetch` and `git rebase origin/main` before every push, after committing.
 
+## Releases
+
+- **Release workflow (2026-10-22, REDnode's way, as every Edgemodders repo that can):** `.github/workflows/release.yml`. Run workflow in the Actions tab builds `REDbridge-<version>-win-x64.zip` (the Release build output, framework dependent, `REDbridge.exe` at its root) and keeps it as the run's artifact. With **Make a release** ticked, or `npm run release`, it stops when `v<version>` exists, when not on main, or when CHANGELOG.md has no section for the version, then makes the GitHub release, which tags the commit. Never `gh release create` by hand any more. REDcode's Install REDbridge and EDGEdeck's Get REDbridge take the newest release's `*-win-x64.zip`: keep that name and `REDbridge.exe` at the root.
+- **Before a release:** raise `<Version>` in `src/REDbridge/REDbridge.csproj`, rename `## Unreleased` in `CHANGELOG.md` to `## <version> (<date>)` with a new empty Unreleased above, and run the probe and REDcode's smoke test against the game. `tools/release-notes.mjs` (`npm run release:notes`) adds the install paragraph and the WolvenKit line from `WolvenKitVersion`.
+- **Changelog:** the Edgemodders convention (groups **New**, **Changed**, **Fixed**, **Other**; a line under Unreleased in the commit that makes the change). Sections up to 0.10.0 were copied from the GitHub releases.
+
 ## The license boundary
 
 - This repo is **GPL-3.0** because it links WolvenKit's GPL-3.0 libraries. REDcode is MIT.

@@ -1,0 +1,107 @@
+# Builds the REDbridge zip: the Release build output of src/REDbridge (framework dependent, Windows x64),
+# zipped as REDbridge-<version>-win-x64.zip with REDbridge.exe at its root. REDcode's Install REDbridge
+# and EDGEdeck's Get REDbridge download the newest release's *-win-x64.zip and unpack it. The same
+# workflow as REDnode's release.yml, so every Edgemodders tool releases the same way.
+#
+#   Run workflow (Actions tab)                  builds the zip and keeps it as the run's artifact,
+#                                               to try before a release
+#   Run workflow, "Make a release" ticked       also tags the commit v<version> and makes the GitHub
+#                                               release with the zip; stops first if that tag exists
+#                                               (raise <Version> in src/REDbridge/REDbridge.csproj),
+#                                               if it is not run on main, or if CHANGELOG.md has no
+#                                               section for the version (tools/release-notes.mjs)
+#   npm run release                             the same as ticking the box, from a terminal
+#
+# Release gate: the probe and REDcode's smoke test need the game, so they run on a machine with
+# Cyberpunk 2077 before a release (CLAUDE.md). Untested or failed means no release.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Make a release (tags this commit v<version>; REDcode and EDGEdeck then offer it). Only after the probe has passed against the game
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  zip:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: The version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/REDbridge/REDbridge.csproj)
+          test -n "${version}" || { echo "::error::No <Version> in src/REDbridge/REDbridge.csproj"; exit 1; }
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+          echo "ZIP=dist/REDbridge-${version}-win-x64.zip" >> "$GITHUB_ENV"
+          if [ "${{ inputs.release }}" = "true" ]; then
+            if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+              echo "::error::Releases are made from main, not ${GITHUB_REF_NAME}"
+              exit 1
+            fi
+            if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v${version}" --silent >/dev/null 2>&1; then
+              echo "::error::v${version} is already released. Raise <Version> in src/REDbridge/REDbridge.csproj."
+              exit 1
+            fi
+          fi
+
+      # Before anything is built: no CHANGELOG.md section for the version stops a release here.
+      - name: Release notes from CHANGELOG.md
+        if: inputs.release
+        run: node tools/release-notes.mjs "${VERSION}" --out "${RUNNER_TEMP}/notes.md"
+
+      - run: dotnet restore src/REDbridge/REDbridge.csproj
+
+      - run: dotnet build src/REDbridge/REDbridge.csproj -c Release --no-restore -v q
+
+      - name: The output has what the bridge needs at run time
+        run: |
+          out=src/REDbridge/bin/Release/net10.0
+          for f in REDbridge.exe DirectXTexNet.dll lib/texconv.dll kraken.dll wwtools.dll opus-tools/opusdec.exe Resources/soundEvents.json; do
+            test -f "$out/$f" || { echo "::error::$f is missing from the build output"; exit 1; }
+          done
+          grep -q DirectXTexNet "$out/REDbridge.deps.json" || { echo "::error::DirectXTexNet is not in REDbridge.deps.json, so texture conversion would fail to load it"; exit 1; }
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path src/REDbridge/bin/Release/net10.0/* -DestinationPath $env:ZIP
+          # What REDcode and EDGEdeck look for once it is unpacked.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $env:ZIP))
+          $names = $zip.Entries.FullName
+          $zip.Dispose()
+          if ($names -notcontains 'REDbridge.exe') { Write-Output "::error::REDbridge.exe is not at the root of the zip"; exit 1 }
+          Write-Output "$($names.Count) entries, $((Get-Item $env:ZIP).Length) bytes"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: REDbridge-zip
+          path: dist/REDbridge-*-win-x64.zip
+          if-no-files-found: error
+
+      # Makes the tag too (--target: this commit).
+      - name: GitHub release
+        if: inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v${VERSION}" "${ZIP}" --target "${GITHUB_SHA}" --title "REDbridge ${VERSION}" --notes-file "${RUNNER_TEMP}/notes.md"
