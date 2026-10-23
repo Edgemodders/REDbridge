@@ -1,3 +1,4 @@
+using System.Text.Json;
 using StreamJsonRpc;
 using WolvenKit.Common;
 using WolvenKit.Common.Model;
@@ -6,6 +7,7 @@ using WolvenKit.RED4.Archive.IO;
 using WolvenKit.RED4.Archive.CR2W;
 using WolvenKit.RED4.CR2W;
 using WolvenKit.RED4.Types;
+using static WolvenKit.RED4.Types.Enums;
 
 namespace REDbridge;
 
@@ -25,8 +27,19 @@ public sealed partial class BridgeApi
         string? MaterialTextureFormat = null,
         bool? MeshLodFilter = null);
 
-    /// <summary>Mesh is set when an import wrote a .mesh (bridge 0.9.0).</summary>
-    public sealed record ModkitResult(bool Ok, List<string> Written, MeshImport? Mesh = null);
+    /// <summary>Mesh is set when an import wrote a .mesh (bridge 0.9.0); Texture when an image import wrote a .xbm, as read back from it.</summary>
+    public sealed record ModkitResult(bool Ok, List<string> Written, MeshImport? Mesh = null, TextureSetup? Texture = null);
+
+    /// <summary>A texture's setup, as an .xbm keeps it (the enum names WolvenKit and the game use).</summary>
+    public sealed record TextureSetup(string Group, string Compression, string RawFormat, bool IsGamma, bool HasMipchain, bool IsStreamable);
+
+    /// <summary>The texture presets <c>project.import</c> takes, as WolvenKit's import sets up these texture groups.</summary>
+    private static readonly Dictionary<string, GpuWrapApieTextureGroup> TexturePresets = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["color"] = GpuWrapApieTextureGroup.TEXG_Generic_Color,
+        ["normal"] = GpuWrapApieTextureGroup.TEXG_Generic_Normal,
+        ["grayscale"] = GpuWrapApieTextureGroup.TEXG_Generic_Grayscale,
+    };
 
     /// <summary>A material the GLB gives its submeshes, by the submesh indices (render chunks) that use it.</summary>
     public sealed record MeshMaterialUse(string Name, IReadOnlyList<int> Submeshes);
@@ -110,9 +123,16 @@ public sealed partial class BridgeApi
     /// source/archive), the way WolvenKit's Import does. With keep (the default, as in WolvenKit),
     /// an existing game file at the target keeps its settings: a texture its group and compression,
     /// a mesh its materials. Written lists the files created or changed, relative to archiveDir.
+    /// <para>
+    /// <paramref name="texture"/> sets up the .xbm an image import writes, and wins over an existing
+    /// texture's setup: a preset name ("color", "normal", "grayscale") or a texture group name, or an
+    /// object <c>{ group, compression, rawFormat, isGamma, hasMipchain, isStreamable }</c> where every
+    /// field is optional and the rest come from the group's defaults (issue #8). Without it, a new
+    /// texture gets WolvenKit's plain defaults, as before.
+    /// </para>
     /// </summary>
     [JsonRpcMethod("project.import")]
-    public async Task<ModkitResult> Import(string file, string rawDir, string archiveDir, bool keep = true, string? template = null)
+    public async Task<ModkitResult> Import(string file, string rawDir, string archiveDir, bool keep = true, string? template = null, JsonElement? texture = null)
     {
         var source = new FileInfo(file);
         if (!source.Exists)
@@ -172,7 +192,17 @@ public sealed partial class BridgeApi
         // its app fills the import dialog from that file first. Do what the dialog does.
         var existing = Path.Combine(archiveDir, Path.ChangeExtension(relative, ".xbm"));
         STextureGroupSetup? kept = null;
-        if (keep && IsImage(ext) && File.Exists(existing))
+        var given = texture is { ValueKind: not (JsonValueKind.Null or JsonValueKind.Undefined) } t ? TextureArgs(t) : null;
+        if (given is not null && !IsImage(ext))
+        {
+            throw new ArgumentException($"texture applies to an image import, not to .{ext}");
+        }
+        if (given is not null)
+        {
+            given.Keep = keep;
+            args.Register(given);
+        }
+        else if (keep && IsImage(ext) && File.Exists(existing))
         {
             using var fs = File.OpenRead(existing);
             if (_host.Parser.ReadRed4File(fs)?.RootChunk is CBitmapTexture { Setup: { } setup })
@@ -194,7 +224,74 @@ public sealed partial class BridgeApi
         {
             written.Add(Path.ChangeExtension(relative, ".mesh"));
         }
-        return new ModkitResult(ok, written, mesh);
+        var textureSetup = ok && IsImage(ext) && written.Contains(Path.ChangeExtension(relative, ".xbm"), StringComparer.OrdinalIgnoreCase) ? ReadTextureSetup(existing) : null;
+        return new ModkitResult(ok, written, mesh, textureSetup);
+    }
+
+    /// <summary>
+    /// Import settings from the texture argument: a preset or group name, or an object whose fields
+    /// override the defaults of its group (TEXG_Generic_Color when it names none), the defaults
+    /// WolvenKit's import gives each group (CommonFunctions.TextureSetupFromTextureGroup).
+    /// </summary>
+    private static XbmImportArgs TextureArgs(JsonElement texture)
+    {
+        static GpuWrapApieTextureGroup Group(string name) =>
+            TexturePresets.TryGetValue(name, out var preset) ? preset
+            : ParseEnum<GpuWrapApieTextureGroup>(name, "texture group", $"or a preset: {string.Join(", ", TexturePresets.Keys)}");
+
+        if (texture.ValueKind == JsonValueKind.String)
+        {
+            return CommonFunctions.TextureSetupFromTextureGroup(Group(texture.GetString()!));
+        }
+        if (texture.ValueKind != JsonValueKind.Object)
+        {
+            throw new ArgumentException("texture is a preset name (color, normal, grayscale) or an object { group, compression, rawFormat, isGamma, hasMipchain, isStreamable }");
+        }
+        var known = new[] { "group", "compression", "rawFormat", "isGamma", "hasMipchain", "isStreamable" };
+        var fields = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in texture.EnumerateObject())
+        {
+            if (!known.Contains(p.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException($"texture has no field '{p.Name}'; fields: {string.Join(", ", known)}");
+            }
+            fields[p.Name] = p.Value;
+        }
+        var args = CommonFunctions.TextureSetupFromTextureGroup(fields.TryGetValue("group", out var g) ? Group(g.GetString() ?? "") : GpuWrapApieTextureGroup.TEXG_Generic_Color);
+        if (fields.TryGetValue("compression", out var c))
+        {
+            args.Compression = ParseEnum<ETextureCompression>(c.GetString() ?? "", "compression");
+        }
+        if (fields.TryGetValue("rawFormat", out var r))
+        {
+            args.RawFormat = ParseEnum<ETextureRawFormat>(r.GetString() ?? "", "raw format");
+        }
+        if (fields.TryGetValue("isGamma", out var gamma))
+        {
+            args.IsGamma = gamma.GetBoolean();
+        }
+        if (fields.TryGetValue("hasMipchain", out var mips))
+        {
+            args.GenerateMipMaps = mips.GetBoolean();
+        }
+        if (fields.TryGetValue("isStreamable", out var streamable))
+        {
+            args.IsStreamable = streamable.GetBoolean();
+        }
+        return args;
+    }
+
+    private static T ParseEnum<T>(string value, string what, string? more = null) where T : struct, Enum =>
+        !int.TryParse(value, out _) && Enum.TryParse<T>(value, true, out var e)
+            ? e
+            : throw new ArgumentException($"Unknown {what} '{value}'; use one of {string.Join(", ", Enum.GetNames<T>())}{(more is null ? "" : $", {more}")}");
+
+    private TextureSetup? ReadTextureSetup(string xbm)
+    {
+        using var fs = File.OpenRead(xbm);
+        return _host.Parser.ReadRed4File(fs)?.RootChunk is CBitmapTexture { Setup: { } s }
+            ? new TextureSetup(s.Group.ToString(), s.Compression.ToString(), s.RawFormat.ToString(), s.IsGamma, s.HasMipchain, s.IsStreamable)
+            : null;
     }
 
     /// <summary>

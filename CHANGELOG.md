@@ -19,6 +19,8 @@ How to keep it:
   - **`loc.searchLines(query, language, limit, projectDir?)`**: lines with every word of the query in either text, or the stringId given as a number, as `{ total, items }`.
   - **`loc.projectLinesFiles(projectDir, language)`** and **`loc.newLinesFile(projectDir, modName, language)`**: a project's subtitle files, and an empty one when it has none, written to `source/archive/<mod>/localization/<language>/subtitles/<mod>.json` and named in its `.xl` under `localization: subtitles:` without rewriting the rest of the file.
   - With a project folder, the project's own subtitle entries win over the game's, as for onscreens: the files its `.xl` files name under `localization: subtitles:`, and any under `source/archive` in a `<language>\subtitles` folder.
+- **`project.import` takes a `texture` setup** (issue #8, for EDGEmat) for the `.xbm` an image import writes. It is a preset, `"color"` (`TEXG_Generic_Color`, `TCM_QualityColor`, gamma on), `"normal"` (`TEXG_Generic_Normal`, `TCM_Normalmap`) or `"grayscale"` (`TEXG_Generic_Grayscale`, `TCM_QualityR`, `TRF_Grayscale`), or a texture group name, or an object `{ group, compression, rawFormat, isGamma, hasMipchain, isStreamable }` whose missing fields come from the group's defaults in WolvenKit. Given, it wins over an existing texture's setup. Without it, imports work as before.
+- **`project.import` reports the texture setup** it wrote, read back from the `.xbm`, as `texture: { group, compression, rawFormat, isGamma, hasMipchain, isStreamable }`.
 
 ## 0.10.0 (2026-10-16)
 

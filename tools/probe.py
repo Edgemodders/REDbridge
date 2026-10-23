@@ -9,8 +9,22 @@ import json
 import os
 import shutil
 import subprocess
+import struct
 import sys
 import time
+import zlib
+
+
+def write_png(path, size=256):
+    """A plain RGBA PNG with a gradient, for the import checks."""
+    rows = b"".join(b"\x00" + bytes(v for x in range(size) for v in (x % 256, y % 256, 128, 255)) for y in range(size))
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
 
 class Bridge:
@@ -167,6 +181,38 @@ def main():
     assert over["male"] == "REDbridge probe line" and over["source"] == "project" and over["voice"] == target["voice"], over
     hit = b.call("loc.searchLines", query="redbridge probe", language="en-us", projectDir=lines_project)
     assert hit["total"] == 1 and hit["items"][0]["stringId"] == target["stringId"], hit
+
+    # project.import with a texture setup (issue #8, for EDGEmat): a new .xbm per preset, an object, and the plain default.
+    tex_project = os.path.join(out, "texture-project")
+    shutil.rmtree(tex_project, ignore_errors=True)
+    raw, arc = os.path.join(tex_project, "source", "raw"), os.path.join(tex_project, "source", "archive")
+    expected = {
+        "color": ("TEXG_Generic_Color", "TCM_QualityColor", True),
+        "normal": ("TEXG_Generic_Normal", "TCM_Normalmap", False),
+        "grayscale": ("TEXG_Generic_Grayscale", "TCM_QualityR", False),
+    }
+    for preset, (group, compression, gamma) in expected.items():
+        png = os.path.join(raw, "probe", f"plain_{preset}01.png")
+        write_png(png)
+        r = step(f"project.import texture={preset}", lambda: b.call("project.import", file=png, rawDir=raw, archiveDir=arc, texture=preset)["texture"])
+        assert (r["group"], r["compression"], r["isGamma"], r["hasMipchain"]) == (group, compression, gamma, True), r
+    png = os.path.join(raw, "probe", "plain_object01.png")
+    write_png(png)
+    r = step("project.import texture={group, compression, isGamma, hasMipchain}", lambda: b.call("project.import", file=png, rawDir=raw, archiveDir=arc, texture={"group": "TEXG_Generic_Normal", "compression": "TCM_Normalmap", "isGamma": False, "hasMipchain": False})["texture"])
+    assert (r["group"], r["compression"], r["isGamma"], r["hasMipchain"]) == ("TEXG_Generic_Normal", "TCM_Normalmap", False, False), r
+    # Re-imported without texture, it keeps the setup it has; with a texture, the texture wins.
+    r = b.call("project.import", file=png, rawDir=raw, archiveDir=arc)["texture"]
+    assert (r["group"], r["compression"], r["hasMipchain"]) == ("TEXG_Generic_Normal", "TCM_Normalmap", False), r
+    r = b.call("project.import", file=png, rawDir=raw, archiveDir=arc, texture="color")["texture"]
+    assert (r["group"], r["compression"], r["isGamma"]) == ("TEXG_Generic_Color", "TCM_QualityColor", True), r
+    png = os.path.join(raw, "probe", "plain_default01.png")
+    write_png(png)
+    step("project.import (no texture: WolvenKit's default)", lambda: b.call("project.import", file=png, rawDir=raw, archiveDir=arc)["texture"])
+    try:
+        b.call("project.import", file=png, rawDir=raw, archiveDir=arc, texture="shiny")
+        raise AssertionError("an unknown preset was accepted")
+    except RuntimeError as e:
+        print("   unknown preset refused:", str(e).splitlines()[0][:90], "...")
 
     b.close()
     print(f"done in {time.time() - t:.1f}s, outputs in {out}")

@@ -39,7 +39,7 @@ REDbridge runs [WolvenKit](https://github.com/WolvenKit/WolvenKit)'s headless C#
 | `convert` | texture.toPng, texture.fileToPng, texture.imageToPng (a plain TGA, DDS, TIFF, BMP, JPG or PNG to PNG, for viewing), mesh.toGltf, audio.toWav | WolvenKit.Common, WolvenKit.Modkit |
 | `mesh` | info, infoMany: a mesh's or an entity template's bounds and appearance names, for an asset index | WolvenKit.RED4 |
 | `sector` | build: an EDGEbuilder scene into a streaming sector, a streaming block and an ArchiveXL file in a REDcode project | WolvenKit.RED4 |
-| `project` | pack (a folder into `<modName>.archive` through WolvenKit's packer, with warnings for paths with capital letters or spaces); export (a file under `source/archive` to the same path under `source/raw`: glTF, an image, WAV and so on) and import (back again, an existing texture keeping all its settings; a GLB over a `template` mesh for a new asset, 0.9.0), each listing the files written | WolvenKit.Modkit |
+| `project` | pack (a folder into `<modName>.archive` through WolvenKit's packer, with warnings for paths with capital letters or spaces); export (a file under `source/archive` to the same path under `source/raw`: glTF, an image, WAV and so on) and import (back again, an existing texture keeping all its settings; a GLB over a `template` mesh for a new asset, 0.9.0; an image with a `texture` setup, a preset `color`, `normal` or `grayscale` or the setup's fields, reporting the setup written), each listing the files written | WolvenKit.Modkit |
 | `modkit` | build | WolvenKit.Modkit |
 | `tweakdb` | types, records (by type, subtypes included, or path prefix, with chosen flats and LocKey text), record, flat, search, names (ids to paths, no load needed). Read offline from the game's `tweakdb_ep1.bin`, loaded on the first call in about 12 s | WolvenKit.RED4 |
 | `sound` | events: the sound event names WolvenKit knows, with their Wwise hashes, which name the event groups in `sfx_container.opusinfo`; importWavs: override game sound effects in a project from `<hash>.wav` files, writing the changed `.opuspak` files and a new index into its `source/archive` (0.9.0) | WolvenKit.Modkit's `soundEvents.json`, `OpusInfo` and opus-tools |
@@ -61,6 +61,18 @@ A GLB or glTF becomes a `.mesh` only over an existing one: WolvenKit's importer 
 | Garment support | Rebuilt from the GLB when garment-support data is in it |
 
 The result's `mesh` field reports the submesh count, the GLB's material names per submesh (the materials for EDGEmat to make), the mesh's material entries, its appearances and what was resized. WolvenKit's own GLB exports name their materials `Default`.
+
+## Texture import
+
+An image imported over an existing `.xbm` keeps that texture's setup. A new one gets WolvenKit's plain defaults (`TEXG_Generic_Color`, `TCM_None`, gamma off), unless `project.import` is given a `texture` setup. The presets use the defaults WolvenKit gives each texture group (`CommonFunctions.TextureSetupFromTextureGroup`, WolvenKit 9.1.0):
+
+| `texture` | Group | Compression | Raw format | Gamma | Mipmaps |
+|---|---|---|---|---|---|
+| `"color"` | `TEXG_Generic_Color` | `TCM_QualityColor` | `TRF_TrueColor` | on | on |
+| `"normal"` | `TEXG_Generic_Normal` | `TCM_Normalmap` | `TRF_TrueColor` | off | on |
+| `"grayscale"` | `TEXG_Generic_Grayscale` | `TCM_QualityR` | `TRF_Grayscale` | off | on |
+
+A texture group name works the same way (`"TEXG_Generic_Data"`). An object, `{ "group": "TEXG_Generic_Normal", "compression": "TCM_Normalmap", "isGamma": false, "hasMipchain": true }`, sets any of `group`, `compression`, `rawFormat`, `isGamma`, `hasMipchain` and `isStreamable`; the rest come from its group. A given setup wins over the existing texture's. The result's `texture` is the setup read back from the `.xbm`. Checked by the probe against WolvenKit's reader, not yet in the game.
 
 ## Repository layout
 
