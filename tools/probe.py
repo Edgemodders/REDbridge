@@ -7,6 +7,7 @@ Standard library only. The bridge's stderr log is passed through.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -134,6 +135,38 @@ def main():
             assert not os.path.exists(os.path.join(project, "source", "archive", "edgebuilder", "bad"))
     else:
         print("   mesh.info / sector.build: no cargo_crate mesh and entity found, skipped")
+
+    # loc.searchLines, loc.lines and loc.newLinesFile (issue #9, for EDGEquest): spoken lines with their voice-over and length.
+    found = step("loc.searchLines 'choom' (builds the index)", lambda: (lambda r: (r["total"], r["items"][0]))(b.call("loc.searchLines", query="choom", language="en-us", limit=50)))
+    assert found[0] > 0, found
+    again = step("loc.searchLines 'need help' (index kept)", lambda: b.call("loc.searchLines", query="need help", language="en-us", limit=50))
+    ids = [i["stringId"] for i in b.call("loc.searchLines", query="choom", language="en-us", limit=50)["items"]] + [i["stringId"] for i in again["items"]]
+    lines = step(f"loc.lines ({len(ids)} ids)", lambda: b.call("loc.lines", stringIds=ids + ["1"], language="en-us"))
+    assert len(lines) == len(ids) + 1 and all(l["female"] is not None and l["file"] for l in lines[:-1]) and lines[-1]["female"] is None, lines[-1]
+    voiced = [l for l in lines if l["voice"] and l["length"]]
+    assert voiced, "no line came back with a voice and a length"
+    print(f"   {len(voiced)} of {len(ids)} voiced; first:", {k: voiced[0][k] for k in ("stringId", "male", "file", "index", "voice", "length", "otherVoices")})
+    lines_project = os.path.join(out, "lines-project")
+    shutil.rmtree(lines_project, ignore_errors=True)
+    os.makedirs(os.path.join(lines_project, "source", "resources"))
+    with open(os.path.join(lines_project, "source", "resources", "probe.archive.xl"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("# kept as it is\nlocalization:\n  onscreens:\n    en-us: probe\\localization\\en-us.json\n")
+    made = step("loc.newLinesFile", lambda: b.call("loc.newLinesFile", projectDir=lines_project, modName="Probe Lines", language="en-us"))
+    xl_text = open(os.path.join(lines_project, made["xl"]), encoding="utf-8").read()
+    assert made["created"] and made["xlWritten"] and "  subtitles:\n    en-us: probe_lines\\localization\\en-us\\subtitles\\probe_lines.json" in xl_text and xl_text.startswith("# kept as it is\n"), xl_text
+    assert not b.call("loc.newLinesFile", projectDir=lines_project, modName="Probe Lines", language="en-us")["created"]
+    # The project's own entry for a game stringId wins: copy the game file's entry into the project file with new text.
+    target = voiced[0]
+    game_json = json.loads(b.call("cr2w.toJson", path=target["file"])["json"])
+    entries = game_json["Data"]["RootChunk"]["root"]["Data"]["entries"]
+    mine = next(e for e in entries if str(e["stringId"]) == target["stringId"])
+    mine["femaleVariant"] = mine["maleVariant"] = "REDbridge probe line"
+    game_json["Data"]["RootChunk"]["root"]["Data"]["entries"] = [mine]
+    b.call("cr2w.fromJson", outFile=os.path.join(lines_project, made["file"]), json=json.dumps(game_json))
+    over = step("loc.lines with projectDir", lambda: b.call("loc.lines", stringIds=[target["stringId"]], language="en-us", projectDir=lines_project)[0])
+    assert over["male"] == "REDbridge probe line" and over["source"] == "project" and over["voice"] == target["voice"], over
+    hit = b.call("loc.searchLines", query="redbridge probe", language="en-us", projectDir=lines_project)
+    assert hit["total"] == 1 and hit["items"][0]["stringId"] == target["stringId"], hit
 
     b.close()
     print(f"done in {time.time() - t:.1f}s, outputs in {out}")

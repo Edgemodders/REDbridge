@@ -160,7 +160,12 @@ public sealed partial class BridgeApi
     private static RedBaseClass EmptyOnscreens() =>
         new JsonResource { Root = new CHandle<ISerializable>(new localizationPersistenceOnScreenEntries()) };
 
-    private static List<LocProjectFile> ProjectLocFilesOf(string projectDir, string language)
+    /// <summary>
+    /// A project's localization files of one kind ("onscreens" or "subtitles") for a language: those its
+    /// .xl files name under <c>localization: &lt;kind&gt;:</c>, then any .json under source/archive in a
+    /// &lt;kind&gt; folder below the language's, as the game keeps them.
+    /// </summary>
+    private static List<LocProjectFile> ProjectLocFilesOf(string projectDir, string language, string kind = "onscreens")
     {
         var archive = Path.Combine(projectDir, "source", "archive");
         var resources = Path.Combine(projectDir, "source", "resources");
@@ -169,7 +174,7 @@ public sealed partial class BridgeApi
         {
             foreach (var xl in Directory.EnumerateFiles(resources, "*.xl", SearchOption.AllDirectories).Order(StringComparer.OrdinalIgnoreCase))
             {
-                foreach (var p in XlOnscreens(File.ReadAllText(xl), language))
+                foreach (var p in XlLocFiles(File.ReadAllText(xl), kind, language))
                 {
                     var full = Path.GetFullPath(Path.Combine(archive, p.Replace('/', '\\').Replace('\\', Path.DirectorySeparatorChar)));
                     files.Add(new LocProjectFile(Path.GetRelativePath(projectDir, full), File.Exists(full), Path.GetRelativePath(projectDir, xl)));
@@ -178,13 +183,13 @@ public sealed partial class BridgeApi
         }
         if (Directory.Exists(archive))
         {
-            // As the game keeps them: under <language>\onscreens\. Subtitles and other localization JSON beside them are not onscreens files.
+            // As the game keeps them: under <language>\<kind>\ (onscreens or subtitles). Other localization JSON beside them is not of this kind.
             files.AddRange(Directory.EnumerateFiles(archive, "*.json", SearchOption.AllDirectories)
                 .Where(f =>
                 {
                     var dirs = Path.GetRelativePath(archive, f).Split(Path.DirectorySeparatorChar).SkipLast(1).ToList();
                     var at = dirs.FindIndex(s => s.Equals(language, StringComparison.OrdinalIgnoreCase));
-                    return at >= 0 && dirs.Skip(at + 1).Any(s => s.Equals("onscreens", StringComparison.OrdinalIgnoreCase));
+                    return at >= 0 && dirs.Skip(at + 1).Any(s => s.Equals(kind, StringComparison.OrdinalIgnoreCase));
                 })
                 .Order(StringComparer.OrdinalIgnoreCase)
                 .Select(f => new LocProjectFile(Path.GetRelativePath(projectDir, f), true, null)));
@@ -196,7 +201,10 @@ public sealed partial class BridgeApi
     /// The .xl text with "<c>language: path</c>" under <c>localization: onscreens:</c>, adding the
     /// blocks it lacks. Lines are inserted, never rewritten, so the rest of the file stays as it was.
     /// </summary>
-    internal static string XlWithOnscreens(string xl, string language, string archivePath)
+    internal static string XlWithOnscreens(string xl, string language, string archivePath) => XlWithLoc(xl, "onscreens", language, archivePath);
+
+    /// <summary>The .xl text with "<c>language: path</c>" under <c>localization: &lt;kind&gt;:</c> (onscreens or subtitles), lines inserted only.</summary>
+    internal static string XlWithLoc(string xl, string kind, string language, string archivePath)
     {
         var nl = xl.Contains("\r\n") ? "\r\n" : "\n";
         var lines = xl.Length == 0 ? new List<string>() : xl.Replace("\r\n", "\n").Split('\n').ToList();
@@ -209,7 +217,7 @@ public sealed partial class BridgeApi
         var entry = $"{language}: {archivePath}";
         if (loc < 0)
         {
-            lines.AddRange(["localization:", "  onscreens:", $"    {entry}"]);
+            lines.AddRange(["localization:", $"  {kind}:", $"    {entry}"]);
         }
         else
         {
@@ -219,10 +227,10 @@ public sealed partial class BridgeApi
             {
                 end++;
             }
-            var on = lines.FindIndex(loc + 1, end - loc - 1, l => l.Trim() == "onscreens:");
+            var on = lines.FindIndex(loc + 1, end - loc - 1, l => l.Trim() == $"{kind}:");
             if (on < 0)
             {
-                lines.InsertRange(loc + 1, ["  onscreens:", $"    {entry}"]);
+                lines.InsertRange(loc + 1, [$"  {kind}:", $"    {entry}"]);
             }
             else
             {
@@ -342,11 +350,15 @@ public sealed partial class BridgeApi
     /// or "<c>language:</c>" followed by "<c>- path</c>" items, under <c>localization: onscreens:</c>.
     /// A small reader for that one block, not a YAML parser.
     /// </summary>
-    internal static IEnumerable<string> XlOnscreens(string xl, string language)
+    internal static IEnumerable<string> XlOnscreens(string xl, string language) => XlLocFiles(xl, "onscreens", language);
+
+    /// <summary>The paths an ArchiveXL file names for a language under <c>localization: &lt;kind&gt;:</c> (onscreens or subtitles).</summary>
+    internal static IEnumerable<string> XlLocFiles(string xl, string kind, string language)
     {
         var inOnscreens = false;
         var inLanguage = false;
         var onscreensIndent = -1;
+        var blockStart = $"{kind}:";
         foreach (var raw in xl.Split('\n'))
         {
             var line = raw.TrimEnd('\r');
@@ -356,7 +368,7 @@ public sealed partial class BridgeApi
                 continue;
             }
             var indent = line.Length - line.TrimStart().Length;
-            if (text.StartsWith("onscreens:", StringComparison.Ordinal))
+            if (text.StartsWith(blockStart, StringComparison.Ordinal))
             {
                 inOnscreens = true;
                 inLanguage = false;

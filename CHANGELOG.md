@@ -12,6 +12,14 @@ How to keep it:
 
 ## Unreleased
 
+### New
+
+- **Spoken lines in `loc.*`** (issue #9, for EDGEquest): the subtitles of the base game and Phantom Liberty, read offline from `localization\<language>\subtitles\**\*.json`, with their voice-over files and lengths. A scene line's `locstringId.ruid` is the line's `stringId`. The first call per language builds an index in about 3 s; searches after it take a few milliseconds.
+  - **`loc.lines(stringIds, language, projectDir?)`**: one result per stringId (decimal text), with both texts, the subtitle file and the row (`index`) in it, `voice` (the `.wem` paths from `voiceovermap.json` and `voiceovermap_1.json`), `length` (seconds, from `stringidvariantlengthsreport.json`) and `otherVoices` (the helmet, holocall and rewinded maps that have it).
+  - **`loc.searchLines(query, language, limit, projectDir?)`**: lines with every word of the query in either text, or the stringId given as a number, as `{ total, items }`.
+  - **`loc.projectLinesFiles(projectDir, language)`** and **`loc.newLinesFile(projectDir, modName, language)`**: a project's subtitle files, and an empty one when it has none, written to `source/archive/<mod>/localization/<language>/subtitles/<mod>.json` and named in its `.xl` under `localization: subtitles:` without rewriting the rest of the file.
+  - With a project folder, the project's own subtitle entries win over the game's, as for onscreens: the files its `.xl` files name under `localization: subtitles:`, and any under `source/archive` in a `<language>\subtitles` folder.
+
 ## 0.10.0 (2026-10-16)
 
 New in 0.10.0: **`loc.*`**, the game's on-screen texts (LocKeys), read offline from each language's `onscreens.json` in the base game and Phantom Liberty. REDcode's LocKeys view and its `loc_*` MCP tools use them.
