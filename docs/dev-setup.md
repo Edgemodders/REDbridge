@@ -72,7 +72,7 @@ Recorded from the submodule build in C0; the package build gives the same set.
 | Data | `Resources/soundEvents.json` | |
 | NuGet packages | 49, listed in `WolvenKit.Modkit.deps.json` | Includes ClearScript V8 (scripting), EF Core Sqlite, SharpGLTF, SharpDX, NAudio, YamlDotNet, Newtonsoft.Json |
 
-The ClearScript V8 native library (`ClearScriptV8.win-x64.dll`) is not in this build output. It is expected to appear on a runtime-specific publish (`dotnet publish -r win-x64`). Unverified until C5, when the script host is built.
+The ClearScript V8 native library (`ClearScriptV8.win-x64.dll`) is not in this build output. It is expected to appear on a runtime-specific publish (`dotnet publish -r win-x64`), unverified. The bridge does not need it: the script host was dropped with REDcode's script runner.
 
 ## 4. Repository and GitHub
 
