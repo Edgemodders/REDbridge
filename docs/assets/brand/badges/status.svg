@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="158" height="22" viewBox="0 0 158 22" role="img" aria-label="status: design phase">
-  <title>status: design phase</title>
-  <path d="M0,0 H153 L158,5 V22 H5 L0,17 Z" fill="#10131b" stroke="#262c3d"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="116" height="22" viewBox="0 0 116 22" role="img" aria-label="status: in use">
+  <title>status: in use</title>
+  <path d="M0,0 H111 L116,5 V22 H5 L0,17 Z" fill="#10131b" stroke="#262c3d"/>
   <path d="M58,0.5 V21.5" stroke="#262c3d"/>
-  <path d="M5,21 H58" stroke="#fcee0a" stroke-width="2"/>
+  <path d="M5,21 H58" stroke="#5dffa1" stroke-width="2"/>
   <g font-family="Consolas, 'DejaVu Sans Mono', Menlo, monospace" font-size="11" text-anchor="middle">
     <text x="29.0" y="15" fill="#8a93a8" textLength="42.0" lengthAdjust="spacingAndGlyphs">STATUS</text>
-    <text x="108.0" y="15" fill="#fcee0a" textLength="84.0" lengthAdjust="spacingAndGlyphs">DESIGN PHASE</text>
+    <text x="87.0" y="15" fill="#5dffa1" textLength="42.0" lengthAdjust="spacingAndGlyphs">IN USE</text>
   </g>
 </svg>

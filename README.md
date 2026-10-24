@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://edgemodders.github.io/REDbridge/"><img src="docs/assets/brand/badges/docs.svg" alt="docs: read the docs"></a>
-  <img src="docs/assets/brand/badges/status.svg" alt="status: design phase">
+  <img src="docs/assets/brand/badges/status.svg" alt="status: in use">
   <img src="docs/assets/brand/badges/wolvenkit.svg" alt="WolvenKit: 9.1">
   <img src="docs/assets/brand/badges/dotnet.svg" alt=".NET: 10">
   <a href="LICENSE"><img src="docs/assets/brand/badges/license.svg" alt="license: GPL-3.0"></a>
@@ -12,12 +12,24 @@
 
 The engine host for [REDcode](https://github.com/Edgemodders/REDcode), a Cyberpunk 2077 modding IDE built on VS Code.
 
-REDbridge runs [WolvenKit](https://github.com/WolvenKit/WolvenKit)'s headless C# libraries in a local process and exposes them over JSON-RPC: archive browsing, CR2W files as JSON and back, texture, mesh and audio conversion, TweakDB queries, import, export and packing. REDcode's extensions are its first client. AI assistants reach the same methods through REDcode's MCP server, `redcode-mcp`, which starts the bridge and talks to it over stdio as the extension does.
+REDbridge runs [WolvenKit](https://github.com/WolvenKit/WolvenKit)'s headless C# libraries in a local process and exposes them over JSON-RPC: archive browsing, CR2W files as JSON and back, texture, mesh and audio conversion, TweakDB queries, on-screen texts and spoken lines, import, export and packing. REDcode's extension was its first client. [EDGEdeck](https://github.com/Edgemodders/EDGEdeck) (conflicts inside mod archives), [REDnode](https://github.com/Edgemodders/REDnode) (sound names in the Sound Tools, and `kernel.bridge()` for mods) and other Edgemodders tools use it too. AI assistants reach the same methods through REDcode's MCP server, `redcode-mcp`, which starts the bridge and talks to it over stdio as the extension does.
 
 **[Read the docs](https://edgemodders.github.io/REDbridge/)** &middot; [REDcode](https://github.com/Edgemodders/REDcode) &middot; [REDnode](https://github.com/Edgemodders/REDnode)
 
 > [!NOTE]
-> **Status: C1 bridge MVP works.** The bridge indexes a game install, lists and searches archives, converts CR2W files to JSON and back byte for byte, decodes textures to PNG and resolves hashes, all over JSON-RPC on stdio. `tools/probe.py` exercises it against a real install in about seven seconds. Next: the REDcode extension that talks to it.
+> **Status: released and in use.** The latest release is [0.10.0](https://github.com/Edgemodders/REDbridge/releases/latest), built with WolvenKit 9.1.0. It is checked against game **2.31**. Game 2.5 (out on 2026-10-22) reads mostly, but not every file: see [issue #10](https://github.com/Edgemodders/REDbridge/issues/10). `tools/probe.py` runs every method against a real install.
+
+## Get REDbridge
+
+Players and modders rarely install REDbridge by hand. The tools that use it fetch it for you:
+
+| Tool | How | Where it goes |
+|---|---|---|
+| REDcode (VS Code) | Command **REDcode: Install REDbridge**, later **Update REDbridge** | REDcode's storage; it sets `redcode.bridgePath` |
+| EDGEdeck (VS Code) | **Get REDbridge** in its view, or the command of that name | EDGEdeck's storage (`edgedeck.bridgePath` empty means that copy) |
+| REDnode (in the game) | The Mod Manager's **Get REDbridge** button | `%LOCALAPPDATA%\REDnode\bridge`, with .NET 10 per user |
+
+REDnode also finds the copy in EDGEdeck's or REDcode's storage, so one install serves all three. To install by hand, download `REDbridge-<version>-win-x64.zip` from [Releases](https://github.com/Edgemodders/REDbridge/releases) and unzip it anywhere. It needs the .NET 10 runtime (`winget install --id Microsoft.DotNet.Runtime.10 -e`) and Windows x64.
 
 ## How it works
 
@@ -26,26 +38,42 @@ REDbridge runs [WolvenKit](https://github.com/WolvenKit/WolvenKit)'s headless C#
  ┌───────────────────────────┐     ┌────────────────────────────┐     ┌────────────────────┐
  │ archive browser           │     │ JSON-RPC 2.0 over stdio    │     │ RED4: CR2W, archives│
  │ CR2W editor               │◄───►│ method groups: archive,    │◄───►│ Common: JSON, DDS   │
- │ import / export / pack    │     │ cr2w, convert, modkit,     │     │ Modkit: glTF, pack  │
- │ AI assistants via MCP     │     │ tweakdb, sound, hash       │     │ Core: Oodle, hashes │
+ │ import / export / pack    │     │ cr2w, texture, project,    │     │ Modkit: glTF, pack  │
+ │ AI assistants via MCP     │     │ tweakdb, sound, loc, hash  │     │ Core: Oodle, hashes │
  └───────────────────────────┘     └────────────────────────────┘     └────────────────────┘
-                                    big outputs (PNG, glTF, WAV) go to a cache folder; RPC returns paths
+                                    big outputs (PNG, glTF, WAV) go to files the client names; RPC returns paths
 ```
 
-| Method group | Examples | Backed by |
+Every method, by group. Each name is `<group>.<method>`, for example `archive.list`.
+
+| Method group | Methods | Backed by |
 |---|---|---|
-| `archive` | archives, list, search, tree, extract, extractMany, openMod and extractFromMod (a mod's .archive anywhere on disk, no game needed) | WolvenKit.RED4 |
+| `bridge` | info: the bridge's version, its WolvenKit version, the game folder and whether its archives are loaded | |
+| `archive` | load (a game folder, when the bridge was started without one), archives, list, search, tree, extract, extractMany, openMod and extractFromMod (a mod's .archive anywhere on disk, no game needed) | WolvenKit.RED4 |
 | `cr2w` | toJson, fromJson, fileToJson; document sessions: open, getNode, getNodes, search, patch, save, close, documents, describeType, createInstance | WolvenKit.RED4, WolvenKit.Common |
-| `convert` | texture.toPng, texture.fileToPng, texture.imageToPng (a plain TGA, DDS, TIFF, BMP, JPG or PNG to PNG, for viewing), mesh.toGltf, audio.toWav | WolvenKit.Common, WolvenKit.Modkit |
+| `texture` | toPng (a game texture), fileToPng (an `.xbm` on disk), imageToPng (a plain TGA, DDS, TIFF, BMP, JPG or PNG to PNG, for viewing). Meshes to glTF and sounds to WAV go through `project.export` | WolvenKit.Common |
 | `mesh` | info, infoMany: a mesh's or an entity template's bounds and appearance names, for an asset index | WolvenKit.RED4 |
 | `sector` | build: an EDGEbuilder scene into a streaming sector, a streaming block and an ArchiveXL file in a REDcode project | WolvenKit.RED4 |
 | `project` | pack (a folder into `<modName>.archive` through WolvenKit's packer, with warnings for paths with capital letters or spaces); export (a file under `source/archive` to the same path under `source/raw`: glTF, an image, WAV and so on) and import (back again, an existing texture keeping all its settings; a GLB over a `template` mesh for a new asset, 0.9.0; an image with a `texture` setup, a preset `color`, `normal` or `grayscale` or the setup's fields, reporting the setup written), each listing the files written | WolvenKit.Modkit |
-| `modkit` | build | WolvenKit.Modkit |
 | `tweakdb` | types, records (by type, subtypes included, or path prefix, with chosen flats and LocKey text), record, flat, search, names (ids to paths, no load needed). Read offline from the game's `tweakdb_ep1.bin`, loaded on the first call in about 12 s | WolvenKit.RED4 |
 | `sound` | events: the sound event names WolvenKit knows, with their Wwise hashes, which name the event groups in `sfx_container.opusinfo`; importWavs: override game sound effects in a project from `<hash>.wav` files, writing the changed `.opuspak` files and a new index into its `source/archive` (0.9.0) | WolvenKit.Modkit's `soundEvents.json`, `OpusInfo` and opus-tools |
 | `loc` | languages, search (by LocKey, secondary key or words in the texts), get (by LocKey or secondary key): the on-screen texts of the base game and Phantom Liberty, read offline, with a project's own onscreens files laid over them (the ones its `.xl` files name, and any under a language folder); projectFiles (those files for a language); newFile (an empty onscreens file for a project, named in an `.xl`). Spoken lines (for EDGEquest): lines (by stringId, a scene line's `locstringId.ruid`, with the subtitle texts, the `.wem` voice-over files from the voice-over maps and the lengths), searchLines (by words in the texts), projectLinesFiles and newLinesFile (a project's subtitle files, named in an `.xl` under `localization: subtitles:`), with a project's own subtitle files laid over the game's in the same way | WolvenKit.RED4 |
 | `hash` | fnv1a64, resolve | WolvenKit.Core |
 | `script` | not planned: REDcode dropped its script runner | |
+
+The spoken lines (`loc.lines`, `loc.searchLines`, `loc.projectLinesFiles`, `loc.newLinesFile`) and `project.import`'s `texture` setup are on `main`, not yet in a release, and not yet tried in the game.
+
+## Talking to the bridge
+
+For a client of your own. REDcode's [`bridgeClient.ts`](https://github.com/Edgemodders/REDcode/blob/main/extensions/redcode/src/bridgeClient.ts) (MIT, no VS Code imports) is a working example.
+
+| What | How |
+|---|---|
+| Start | `REDbridge.exe [--game "<Cyberpunk 2077 folder>"]`. Without `--game`, the `REDBRIDGE_GAME` environment variable is used. A per-user .NET needs `DOTNET_ROOT` set for the process (see the [setup guide](https://edgemodders.github.io/REDbridge/dev-setup.html#net-runtime-location)) |
+| Protocol | JSON-RPC 2.0 on stdin and stdout, each message framed with a `Content-Length` header, as language servers do. Parameters by name, keys in camelCase |
+| Log | stderr. Nothing else writes to stdout |
+| No game | Methods that read the game's files answer "No game loaded" until `archive.load` is called. `archive.openMod`, `archive.extractFromMod`, `hash.*`, `tweakdb.names`, `sound.events`, `project.pack`, `cr2w.fileToJson`, `cr2w.fromJson` and `cr2w.open` with a `file` need no game |
+| Stop | Close stdin; the bridge exits when the client disconnects |
 
 ## Mesh import
 
@@ -83,6 +111,9 @@ A texture group name works the same way (`"TEXG_Generic_Data"`). An object, `{ "
 | `src/REDbridge/` | The bridge: host, RPC surface, stderr logger |
 | `tools/probe.py` | Stdlib Python client that runs every method over the real protocol |
 | `tools/wolvenkit-source.mjs` | Fetches WolvenKit's source at the version the bridge uses into `external/WolvenKit`, for reading (`npm run wolvenkit:source`) |
+| `tools/dotnet.mjs` | Finds the .NET SDK for the npm scripts |
+| `tools/release-notes.mjs` | Prints a release's GitHub notes from `CHANGELOG.md` (`npm run release:notes`) |
+| `CHANGELOG.md` | What changed in each release |
 
 ## Build
 
@@ -106,7 +137,7 @@ Phases follow the REDcode roadmap.
 
 ## Compatibility goals
 
-REDbridge pins a WolvenKit version and tracks its releases. Changes that make WolvenKit's libraries easier to host are sent upstream. Windows only for now, because WolvenKit's texture tooling is.
+REDbridge pins a WolvenKit version and tracks its releases. Changes that make WolvenKit's libraries easier to host are sent upstream. Windows only for now, because WolvenKit's texture tooling is. Each release is checked against one game version, 2.31 for now; a game patch can change file formats until WolvenKit catches up.
 
 ## Legal
 
