@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="116" height="22" viewBox="0 0 116 22" role="img" aria-label="wolvenkit: 9.1">
-  <title>wolvenkit: 9.1</title>
-  <path d="M0,0 H111 L116,5 V22 H5 L0,17 Z" fill="#10131b" stroke="#262c3d"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="158" height="22" viewBox="0 0 158 22" role="img" aria-label="wolvenkit: 10.0 beta">
+  <title>wolvenkit: 10.0 beta</title>
+  <path d="M0,0 H153 L158,5 V22 H5 L0,17 Z" fill="#10131b" stroke="#262c3d"/>
   <path d="M79,0.5 V21.5" stroke="#262c3d"/>
   <path d="M5,21 H79" stroke="#19f3ff" stroke-width="2"/>
   <g font-family="Consolas, 'DejaVu Sans Mono', Menlo, monospace" font-size="11" text-anchor="middle">
     <text x="39.5" y="15" fill="#8a93a8" textLength="63.0" lengthAdjust="spacingAndGlyphs">WOLVENKIT</text>
-    <text x="97.5" y="15" fill="#19f3ff" textLength="21.0" lengthAdjust="spacingAndGlyphs">9.1</text>
+    <text x="118.5" y="15" fill="#19f3ff" textLength="63.0" lengthAdjust="spacingAndGlyphs">10.0 BETA</text>
   </g>
 </svg>

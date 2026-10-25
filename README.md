@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://edgemodders.github.io/REDbridge/"><img src="docs/assets/brand/badges/docs.svg" alt="docs: read the docs"></a>
   <img src="docs/assets/brand/badges/status.svg" alt="status: in use">
-  <img src="docs/assets/brand/badges/wolvenkit.svg" alt="WolvenKit: 9.1">
+  <img src="docs/assets/brand/badges/wolvenkit.svg" alt="WolvenKit: 10.0 beta">
   <img src="docs/assets/brand/badges/dotnet.svg" alt=".NET: 10">
   <a href="LICENSE"><img src="docs/assets/brand/badges/license.svg" alt="license: GPL-3.0"></a>
 </p>
@@ -17,7 +17,7 @@ REDbridge runs [WolvenKit](https://github.com/WolvenKit/WolvenKit)'s headless C#
 **[Read the docs](https://edgemodders.github.io/REDbridge/)** &middot; [REDcode](https://github.com/Edgemodders/REDcode) &middot; [REDnode](https://github.com/Edgemodders/REDnode)
 
 > [!NOTE]
-> **Status: released and in use.** The latest release is [0.10.0](https://github.com/Edgemodders/REDbridge/releases/latest), built with WolvenKit 9.1.0. It is checked against game **2.31**. Game 2.5 (out on 2026-10-22) reads mostly, but not every file: see [issue #10](https://github.com/Edgemodders/REDbridge/issues/10). `tools/probe.py` runs every method against a real install.
+> **Status: released and in use.** The latest release is [0.10.0](https://github.com/Edgemodders/REDbridge/releases/latest), built with WolvenKit 9.1.0. It is checked against game **2.31**. Game 2.5 (out on 2026-10-22) reads on `main`, built with WolvenKit 10.0.0-beta.1; 2.31 streaming sectors then no longer read right. See [issue #10](https://github.com/Edgemodders/REDbridge/issues/10) and the [changelog](CHANGELOG.md). `tools/probe.py` runs every method against a real install.
 
 ## Get REDbridge
 
@@ -137,7 +137,7 @@ Phases follow the REDcode roadmap.
 
 ## Compatibility goals
 
-REDbridge pins a WolvenKit version and tracks its releases. Changes that make WolvenKit's libraries easier to host are sent upstream. Windows only for now, because WolvenKit's texture tooling is. Each release is checked against one game version, 2.31 for now; a game patch can change file formats until WolvenKit catches up.
+REDbridge pins a WolvenKit version and tracks its releases. Changes that make WolvenKit's libraries easier to host are sent upstream. Windows only for now, because WolvenKit's texture tooling is. Each release is checked against one game version, 2.31 for now, 2.5 next; a game patch can change file formats until WolvenKit catches up.
 
 ## Legal
 

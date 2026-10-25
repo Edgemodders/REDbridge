@@ -14,7 +14,7 @@ COLORS = {"yellow": "#fcee0a", "cyan": "#19f3ff", "green": "#5dffa1"}
 
 BADGES = [
     ('status', 'status', 'in use', 'green'),
-    ('wolvenkit', 'wolvenkit', '9.1', 'cyan'),
+    ('wolvenkit', 'wolvenkit', '10.0 beta', 'cyan'),
     ('dotnet', 'dotnet', '10', 'cyan'),
     ('license', 'license', 'GPL-3.0', 'green'),
     ('docs', 'docs', 'read the docs', 'yellow'),

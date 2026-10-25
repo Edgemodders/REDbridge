@@ -45,7 +45,7 @@ A machine-wide `dotnet.exe` in `C:\Program Files\dotnet` may exist as a runtime 
 
 ## 3. WolvenKit
 
-REDbridge uses WolvenKit's headless libraries from WolvenKit's own NuGet packages: `WolvenKit.Core`, `WolvenKit.RED4`, `WolvenKit.Common` and `WolvenKit.Modkit`, all at `WolvenKitVersion` in `src/REDbridge/REDbridge.csproj` (9.1.0 since 2026-10-15). They are GPL-3.0, and their source is WolvenKit's repository at the tag of that version. This repo never commits WolvenKit's binaries; `dotnet restore` fetches them.
+REDbridge uses WolvenKit's headless libraries from WolvenKit's own NuGet packages: `WolvenKit.Core`, `WolvenKit.RED4`, `WolvenKit.Common` and `WolvenKit.Modkit`, all at `WolvenKitVersion` in `src/REDbridge/REDbridge.csproj` (10.0.0-beta.1 since 2026-10-25, for game 2.5; 9.1.0 from 2026-10-15). They are GPL-3.0, and their source is WolvenKit's repository at the tag of that version. This repo never commits WolvenKit's binaries; `dotnet restore` fetches them.
 
 Until 2026-10-15 the libraries were built from a git submodule at `external/WolvenKit`. The package build was checked against that build before the switch: the same files in the output (debug symbols aside), and the probe, REDcode's smoke test, a `.wem` to Ogg export and a mesh to glTF export all pass. Two things the packages need in the project file:
 
@@ -53,6 +53,8 @@ Until 2026-10-15 the libraries were built from a git submodule at `external/Wolv
 |---|---|
 | A `Reference` to `DirectXTexNet.dll` inside the WolvenKit.Common package | The package ships it as a content file, not a library, so .NET leaves it out of `REDbridge.deps.json` and `texture.toPng` fails with "Could not load file or assembly DirectXTexNet". The Build workflow checks it is listed |
 | A direct `PackageReference` to `NAudio.Lame` | Its build step copies `libmp3lame.*.dll` and runs only for a direct reference. The bridge does not encode MP3; it keeps the output the same as before |
+
+**Game versions.** WolvenKit 10.0.0-beta.1 reads streaming sectors' node data only in game 2.5's form. Checked on 2026-10-25 against the 2.5 install and a 2.31 copy: the probe and REDcode's smoke test pass on both; 2.31's quest sectors fail or come back with wrong `nodeData`.
 
 **Updating WolvenKit.** Dependabot (`.github/dependabot.yml`) opens a pull request each week a new WolvenKit release is out, raising `WolvenKitVersion`. The Build workflow (`.github/workflows/build.yml`) checks that it compiles and that the run-time files are in the output. Before merging, on a machine with the game: build into a scratch folder (`dotnet build src/REDbridge -c Release -o <folder>`), run `tools/probe.py` and REDcode's `npm run smoke` against it, then release the bridge.
 
