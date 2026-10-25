@@ -133,9 +133,12 @@ def main():
         kinds = [n["Data"]["$type"] for n in root["nodes"]]
         data = root["nodeData"]["Data"]
         assert kinds == ["worldMeshNode", "worldEntityNode", "worldStaticLightNode"], kinds
-        assert len(data) == 3 and data[1]["UkFloat1"] == 120 and data[1]["MaxStreamingDistance"] == 100, data[1]
-        assert data[0]["QuestPrefabRefHash"]["$value"] == "edgebuilder/probe_scene/crate_a", data[0]["QuestPrefabRefHash"]
-        print("   sector version", root["version"], "nodes", kinds, "bounds of crate_a", data[0]["Bounds"]["Min"], data[0]["Bounds"]["Max"])
+        # Game 2.5's node-data record (worldCompiledNodeInstanceSetupInfo): one entry per node, in node order.
+        assert len(data) == 3 and [d["nodeIdx"] for d in data] == ["0", "1", "2"], [d.get("nodeIdx") for d in data]
+        assert data[1]["streamingDistance"] == 120 and data[1]["secondaryRefPointDistance"] == 100, data[1]
+        crate_ref = b.call("hash.fnv1a64", value="edgebuilder/probe_scene/crate_a")["hash"]
+        assert data[0]["globalNodeId"]["hash"] == crate_ref, (data[0]["globalNodeId"], crate_ref)
+        print("   sector version", root["version"], "nodes", kinds, "crate_a at", data[0]["transform"]["position"], "streams from", data[0]["streamingRefPoint"])
         blockBack = step("cr2w.fileToJson (the block reads back)", lambda: b.call("cr2w.fileToJson", file=built["block"]))
         desc = json.loads(blockBack["json"])["Data"]["RootChunk"]["descriptors"]
         assert len(desc) == 1 and desc[0]["data"]["DepotPath"]["$value"].endswith("probe_scene.streamingsector"), desc

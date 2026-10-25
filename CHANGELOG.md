@@ -16,6 +16,22 @@ How to keep it:
 
 - **Reads game 2.5** (issue #10): built with WolvenKit 10.0.0-beta.1, WolvenKit's first build with support for game 2.5, instead of 9.1.0. All 3,041 quest streaming sectors of 2.5 read; 9.1.0 failed 262 of them because they hold node classes new in 2.5. The game's CR2W version did not change: 2.31's files are version 195 (0xC3) too.
 - **Game 2.31's streaming sectors no longer read right.** WolvenKit 10.0.0-beta.1 reads node data only in 2.5's form. On a 2.31 install, 383 of 3,054 quest sectors fail ("Non-zero padding bytes found") and the others come back with wrong `nodeData` entries. Every other method still passes the probe and REDcode's smoke test on 2.31.
+- **A streaming sector's `nodeData` has new field names** in `cr2w.*` JSON. WolvenKit 10 reads each entry as the game's `worldCompiledNodeInstanceSetupInfo`, with one entry per node in node order:
+
+  | Was (WolvenKit 9.1) | Now |
+  |---|---|
+  | `NodeIndex` (wrong on 2.5) | `nodeIdx`, a number as text |
+  | `Position`, `Orientation` | `transform.position`, `transform.orientation` |
+  | `Scale` | `scale` |
+  | `Pivot` | `secondaryRefPointPosition` |
+  | `Bounds.Min`, `Bounds.Max` | `streamingRefPoint`, `preboostStreamingRefPoint`: never bounds |
+  | `Id` | `patchedNode` |
+  | `QuestPrefabRefHash`, resolved to the node path | `globalNodeId.hash`, a number only. It is WolvenKit's NodeRef hash: FNV-1a 64 of the path with every `#` left out |
+  | `UkHash1` | `proxyMeshId.hash` |
+  | `CookedPrefabData` | `externalInplaceResourceHash` |
+  | `MaxStreamingDistance`, `UkFloat1` | `secondaryRefPointDistance`, `streamingDistance` |
+  | `Uk10` to `Uk14` | `nodeFlags`, `streamingPriority`, `todvisMask`, `instanceIndex`, `dataGroup` |
+- **`sector.build` writes game 2.5 sectors**: version 68 and 2.5's node-data record, with the node flags, streaming priority and reference points of base-game 2.5 mesh, entity and light nodes. The scene format and the result are unchanged. Not yet tried in the game.
 
 ### New
 

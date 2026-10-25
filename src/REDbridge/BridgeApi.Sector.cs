@@ -17,9 +17,11 @@ namespace REDbridge;
 /// patches the block into the world. Written with WolvenKit's own writers into a REDcode project,
 /// under source/archive (game files) and source/resources (the .xl). Asked for by EDGEbuilder (issue #1).
 ///
-/// The node-data fields come from base-game sectors of the same node types (2.31): a mesh node, an
-/// entity node and a light node were read and their flag words copied. Streaming ranges default to
-/// a function of the object's size and can be set per object.
+/// The node-data fields follow base-game 2.5 sectors of the same node types: node flags, streaming
+/// priority, reference points and the sector version were copied from mesh, entity and light nodes.
+/// Streaming ranges default to a function of the object's size and can be set per object.
+/// Game 2.5 changed the node-data record (worldCompiledNodeInstanceSetupInfo); the bridge writes
+/// only the 2.5 form.
 /// </summary>
 public sealed partial class BridgeApi
 {
@@ -61,9 +63,9 @@ public sealed partial class BridgeApi
 
     public sealed class SceneStreaming
     {
-        /// <summary>Metres. The distance the node streams in at (the game's "UkFloat1").</summary>
+        /// <summary>Metres. The distance the node streams in at (the node data's streamingDistance).</summary>
         public float? Primary { get; set; }
-        /// <summary>Metres. The node's max streaming distance; none means always.</summary>
+        /// <summary>Metres. The node's secondary streaming distance (secondaryRefPointDistance); none means always.</summary>
         public float? Secondary { get; set; }
     }
 
@@ -77,16 +79,19 @@ public sealed partial class BridgeApi
         AllowTrailingCommas = true,
     };
 
-    /// <summary>Node-data flag words seen on base-game nodes of each type (2.31). Their meaning is unknown.</summary>
-    private static readonly Dictionary<string, (ushort Uk10, ushort Uk11)> NodeFlags = new()
+    /// <summary>
+    /// Node flags and streaming priority seen on most base-game nodes of each type in 2.5's exterior sectors
+    /// (12 sectors sampled on 2026-10-25).
+    /// </summary>
+    private static readonly Dictionary<string, (Enums.ENodeFlags Flags, ulong Priority)> NodeSetup = new()
     {
-        ["mesh"] = (1040, 20610),
-        ["entity"] = (1120, 10762),
-        ["light"] = (1088, 512),
+        ["mesh"] = (Enums.ENodeFlags.FLAG_Building | Enums.ENodeFlags.FLAG_Culling_IsCullable | Enums.ENodeFlags.FLAG_AllowDistanceBoosting, 1),
+        ["entity"] = (Enums.ENodeFlags.FLAG_AllowForceStreamIn | Enums.ENodeFlags.FLAG_Building | Enums.ENodeFlags.FLAG_Culling_IsCullable | Enums.ENodeFlags.FLAG_Culling_IsForceCulledNearPeripheral, 21),
+        ["light"] = (Enums.ENodeFlags.FLAG_Building, 1),
     };
 
-    private const uint NodeDataBufferFlags = 4063232; // as on base-game sectors
-    private const int SectorVersion = 62;
+    private const uint NodeDataBufferFlags = 7471104; // as on base-game 2.5 sectors
+    private const int SectorVersion = 68; // as on base-game 2.5 sectors
     private const string WorldBlock = @"base\worlds\03_night_city\_compiled\default\blocks\all.streamingblock";
 
     /// <summary>
@@ -136,7 +141,7 @@ public sealed partial class BridgeApi
             {
                 errors.Add($"{label}: needs an id");
             }
-            if (!NodeFlags.ContainsKey(o.Kind))
+            if (!NodeSetup.ContainsKey(o.Kind))
             {
                 errors.Add($"{label}: kind '{o.Kind}' is not mesh, entity or light");
             }
@@ -191,26 +196,35 @@ public sealed partial class BridgeApi
             largestRange = Math.Max(largestRange, Math.Max(primary, secondary));
 
             sector.Nodes.Add(new CHandle<worldNode>(NodeFor(o)));
-            var flags = NodeFlags[o.Kind];
-            nodeData.Add(new worldNodeData
+            var setup = NodeSetup[o.Kind];
+            var position = new Vector3 { X = o.Transform.Position[0], Y = o.Transform.Position[1], Z = o.Transform.Position[2] };
+            // Base-game mesh nodes stream from the middle of their bounds; entities and lights from their position.
+            var refPoint = o.Kind == "mesh"
+                ? new Vector3 { X = (world.Min[0] + world.Max[0]) / 2, Y = (world.Min[1] + world.Max[1]) / 2, Z = (world.Min[2] + world.Max[2]) / 2 }
+                : position;
+            nodeData.Add(new worldCompiledNodeInstanceSetupInfo
             {
-                Id = FNV1A64HashAlgorithm.HashString(o.Ref!),
-                NodeIndex = (ushort)i,
-                Position = new Vector4 { X = o.Transform.Position[0], Y = o.Transform.Position[1], Z = o.Transform.Position[2], W = 0 },
-                Orientation = new Quaternion { I = o.Transform.Rotation[0], J = o.Transform.Rotation[1], K = o.Transform.Rotation[2], R = o.Transform.Rotation[3] },
-                Scale = new Vector3 { X = o.Transform.Scale[0], Y = o.Transform.Scale[1], Z = o.Transform.Scale[2] },
-                Pivot = new Vector3 { X = o.Transform.Position[0], Y = o.Transform.Position[1], Z = o.Transform.Position[2] },
-                Bounds = new Box
+                Transform = new Transform
                 {
-                    Min = new Vector4 { X = world.Min[0], Y = world.Min[1], Z = world.Min[2], W = 0 },
-                    Max = new Vector4 { X = world.Max[0], Y = world.Max[1], Z = world.Max[2], W = 0 },
+                    Position = new Vector4 { X = position.X, Y = position.Y, Z = position.Z, W = 0 },
+                    Orientation = new Quaternion { I = o.Transform.Rotation[0], J = o.Transform.Rotation[1], K = o.Transform.Rotation[2], R = o.Transform.Rotation[3] },
                 },
-                QuestPrefabRefHash = o.Ref!,
-                UkHash1 = 0,
-                MaxStreamingDistance = o.Streaming?.Secondary is null && o.Streaming?.Primary is null ? secondary : (o.Streaming.Secondary ?? float.MaxValue),
-                UkFloat1 = primary,
-                Uk10 = flags.Uk10,
-                Uk11 = flags.Uk11,
+                Scale = new Vector3 { X = o.Transform.Scale[0], Y = o.Transform.Scale[1], Z = o.Transform.Scale[2] },
+                SecondaryRefPointPosition = new Vector3 { X = refPoint.X, Y = refPoint.Y, Z = refPoint.Z },
+                StreamingRefPoint = new Vector3 { X = refPoint.X, Y = refPoint.Y, Z = refPoint.Z },
+                PreboostStreamingRefPoint = new Vector3 { X = position.X, Y = position.Y, Z = position.Z },
+                PatchedNode = 0,
+                GlobalNodeId = new worldGlobalNodeID { Hash = (ulong)(NodeRef)o.Ref! },
+                ProxyMeshId = new worldGlobalNodeID { Hash = 0 },
+                ExternalInplaceResourceHash = new CResourceReference<worldCookedPrefabData>(0UL),
+                NodeIdx = (ulong)i,
+                NodeFlags = setup.Flags,
+                StreamingPriority = setup.Priority,
+                TodvisMask = 0,
+                SecondaryRefPointDistance = o.Streaming?.Secondary is null && o.Streaming?.Primary is null ? secondary : (o.Streaming.Secondary ?? float.MaxValue),
+                StreamingDistance = primary,
+                InstanceIndex = uint.MaxValue,
+                DataGroup = Enums.worldStreamingDataGroup.Base,
             });
             for (var k = 0; k < 3; k++)
             {
