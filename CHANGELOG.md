@@ -14,8 +14,8 @@ How to keep it:
 
 ### Changed
 
-- **Reads game 2.5** (issue #10): built with WolvenKit 10.0.0-beta.1, WolvenKit's first build with support for game 2.5, instead of 9.1.0. All 3,041 quest streaming sectors of 2.5 read; 9.1.0 failed 262 of them because they hold node classes new in 2.5. The game's CR2W version did not change: 2.31's files are version 195 (0xC3) too.
-- **Game 2.31's streaming sectors no longer read right.** WolvenKit 10.0.0-beta.1 reads node data only in 2.5's form. On a 2.31 install, 383 of 3,054 quest sectors fail ("Non-zero padding bytes found") and the others come back with wrong `nodeData` entries. Every other method still passes the probe and REDcode's smoke test on 2.31.
+- **Reads game 2.5** (issue #10): built with WolvenKit 10.0.0-beta.1, WolvenKit's first build with support for game 2.5, instead of 9.1.0. All 3,041 quest streaming sectors of 2.5 read; 9.1.0 failed 262 of them because they hold node classes new in 2.5. The game's CR2W version did not change: 2.31's files are version 195 (0xC3) too. In other file types the JSON only gains the fields 2.5 added, such as `boundingBoxLocalBoundsOverride` on skinned mesh components and `astcQuality` in texture setups; no field was renamed or dropped in the types compared (30 file types, 5 files each).
+- **Game 2.31's streaming sectors no longer read right.** WolvenKit 10.0.0-beta.1 reads node data and instanced mesh transforms only in 2.5's form. On a 2.31 install, 383 of 3,054 quest sectors fail ("Non-zero padding bytes found"), the others come back with wrong `nodeData` entries, and `worldInstancedMeshNode` loses its transforms. Every other method still passes the probe and REDcode's smoke test on 2.31.
 - **A streaming sector's `nodeData` has new field names** in `cr2w.*` JSON. WolvenKit 10 reads each entry as the game's `worldCompiledNodeInstanceSetupInfo`, with one entry per node in node order:
 
   | Was (WolvenKit 9.1) | Now |
