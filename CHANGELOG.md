@@ -12,6 +12,11 @@ How to keep it:
 
 ## Unreleased
 
+### Changed
+
+- **Reads game 2.5** (issue #10): built with WolvenKit 10.0.0-beta.1, WolvenKit's first build with support for game 2.5, instead of 9.1.0. All 3,041 quest streaming sectors of 2.5 read; 9.1.0 failed 262 of them because they hold node classes new in 2.5. The game's CR2W version did not change: 2.31's files are version 195 (0xC3) too.
+- **Game 2.31's streaming sectors no longer read right.** WolvenKit 10.0.0-beta.1 reads node data only in 2.5's form. On a 2.31 install, 383 of 3,054 quest sectors fail ("Non-zero padding bytes found") and the others come back with wrong `nodeData` entries. Every other method still passes the probe and REDcode's smoke test on 2.31.
+
 ### New
 
 - **Spoken lines in `loc.*`** (issue #9, for EDGEquest): the subtitles of the base game and Phantom Liberty, read offline from `localization\<language>\subtitles\**\*.json`, with their voice-over files and lengths. A scene line's `locstringId.ruid` is the line's `stringId`. The first call per language builds an index in about 3 s; searches after it take a few milliseconds.

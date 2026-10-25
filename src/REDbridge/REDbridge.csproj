@@ -22,7 +22,7 @@
        https://github.com/WolvenKit/WolvenKit, the tag of the same version). Dependabot proposes each
        new release by raising WolvenKitVersion, which all four and the DirectXTexNet path below share. -->
   <PropertyGroup>
-    <WolvenKitVersion>9.1.0</WolvenKitVersion>
+    <WolvenKitVersion>10.0.0-beta.1</WolvenKitVersion>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="WolvenKit.Core" Version="$(WolvenKitVersion)" />
