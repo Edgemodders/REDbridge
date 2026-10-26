@@ -88,6 +88,9 @@ def main():
     step("tweakdb.types (loads TweakDB)", lambda: (lambda r: (r["file"], r["records"], r["types"][0]))(b.call("tweakdb.types")))
     step("tweakdb.flat Items.money.quality", lambda: b.call("tweakdb.flat", path="Items.money.quality")["value"])
     step("tweakdb.records Clothing", lambda: (lambda r: (r["total"], r["items"][0]))(b.call("tweakdb.records", type="Clothing", flats=["entityName", "displayName", "equipArea"], limit=1, resolveLocKeys=True)))
+    converse = "base\\characters\\garment\\player_equipment\\feet\\s1_055_shoe__converse\\s1_055_pma_shoe__converse.mesh"
+    items = step("mesh.items (Converse high-tops)", lambda: (lambda r: (len(r["items"]), len(r["looks"]), r["items"][0]["record"] if r["items"] else None))(b.call("mesh.items", path=converse)))
+    print("   red_yellow_graphic is Items.CasualShoes_01_basic_01:", any(i["record"] == "Items.CasualShoes_01_basic_01" for i in b.call("mesh.items", path=converse, appearance="red_yellow_graphic")["items"]))
 
     ent = b.call("archive.list", prefix="base\\characters", limit=50)["items"]
     ent = next((i for i in ent if i["name"].endswith(".ent")), None) or next(iter(ent))
