@@ -17,7 +17,7 @@ REDbridge runs [WolvenKit](https://github.com/WolvenKit/WolvenKit)'s headless C#
 **[Read the docs](https://edgemodders.github.io/REDbridge/)** &middot; [REDcode](https://github.com/Edgemodders/REDcode) &middot; [REDnode](https://github.com/Edgemodders/REDnode)
 
 > [!NOTE]
-> **Status: released and in use.** The latest release is [0.10.0](https://github.com/Edgemodders/REDbridge/releases/latest), built with WolvenKit 9.1.0. It is checked against game **2.31**. Game 2.5 (out on 2026-10-22) reads on `main`, built with WolvenKit 10.0.0-beta.1; 2.31 streaming sectors then no longer read right. See [issue #10](https://github.com/Edgemodders/REDbridge/issues/10) and the [changelog](CHANGELOG.md). `tools/probe.py` runs every method against a real install.
+> **Status: released and in use.** The latest release is [0.11.0](https://github.com/Edgemodders/REDbridge/releases/latest), built with WolvenKit 10.0.0-beta.1, for game **2.5** (out on 2026-10-22). Game 2.31's streaming sectors no longer read right with it; use 0.10.0 (WolvenKit 9.1.0) for those. See [issue #10](https://github.com/Edgemodders/REDbridge/issues/10) and the [changelog](CHANGELOG.md). `tools/probe.py` runs every method against a real install.
 
 ## Get REDbridge
 

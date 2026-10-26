@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>REDbridge</RootNamespace>
     <AssemblyName>REDbridge</AssemblyName>
-    <Version>0.10.0</Version>
+    <Version>0.11.0</Version>
     <InvariantGlobalization>true</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>

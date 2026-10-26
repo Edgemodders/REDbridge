@@ -12,6 +12,8 @@ How to keep it:
 
 ## Unreleased
 
+## 0.11.0 (2026-10-26)
+
 ### Changed
 
 - **Reads game 2.5** (issue #10): built with WolvenKit 10.0.0-beta.1, WolvenKit's first build with support for game 2.5, instead of 9.1.0. All 3,041 quest streaming sectors of 2.5 read; 9.1.0 failed 262 of them because they hold node classes new in 2.5. The game's CR2W version did not change: 2.31's files are version 195 (0xC3) too. In other file types the JSON only gains the fields 2.5 added, such as `boundingBoxLocalBoundsOverride` on skinned mesh components and `astcQuality` in texture setups; no field was renamed or dropped in the types compared (30 file types, 5 files each).
