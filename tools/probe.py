@@ -158,6 +158,53 @@ def main():
         except RuntimeError as e:
             print("   bad scene refused:", str(e).splitlines()[0][:100], "...")
             assert not os.path.exists(os.path.join(project, "source", "archive", "edgebuilder", "bad"))
+
+        # Mod files (issue #12): mesh.info and sector.build read a project's loose files and a mod's archive.
+        loose = os.path.join(project, "source", "archive")
+        copy_mesh, copy_ent = "redbridge_probe\\crate_copy.mesh", "redbridge_probe\\crate_copy.ent"
+        b.call("archive.extract", path=mesh["name"], outFile=os.path.join(loose, copy_mesh))
+        b.call("archive.extract", path=ent["name"], outFile=os.path.join(loose, copy_ent))
+        lm = step("mesh.info (loose file, root)", lambda: b.call("mesh.info", path=copy_mesh, root=loose))
+        assert lm["type"] == "mesh" and lm["bounds"] == mi["bounds"] and lm["path"] == copy_mesh, lm
+        le = step("mesh.info (loose entity, its parts from the game)", lambda: b.call("mesh.info", path=copy_ent.replace("\\", "/"), root=loose))
+        assert le["type"] == "entity" and le["bounds"] == ei["bounds"] and all(p["error"] is None for p in le["parts"]), le
+        missing = b.call("mesh.infoMany", paths=[copy_mesh, "redbridge_probe\\nope.mesh", "..\\..\\..\\scene.json"], root=loose)
+        assert missing[0]["error"] is None and "nor in the game's archives" in missing[1]["error"] and missing[2]["error"], missing
+        print("   not found:", missing[1]["error"][:90], "| outside the folder:", missing[2]["error"][:60])
+        try:
+            b.call("mesh.info", path=copy_mesh)
+            raise AssertionError("a loose file was found without root")
+        except RuntimeError as e:
+            print("   without root:", str(e).splitlines()[0][:80])
+        one = {"id": "copy", "kind": "mesh", "resource": copy_mesh, "transform": {"position": [-1200.0, 1505.0, 20.0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]}}
+        mod_built = step("sector.build (a loose mesh, root)", lambda: b.call("sector.build", project=project, name="probe_mod", root=loose, scene={"format": 1, "objects": [one]}))
+        assert mod_built["nodes"] == 1 and not mod_built["warnings"], mod_built
+        try:
+            b.call("sector.build", project=project, name="probe_mod_nobounds", scene={"format": 1, "objects": [one]})
+            raise AssertionError("a resource found nowhere, without bounds, was accepted")
+        except RuntimeError as e:
+            print("   no root, no bounds: refused:", str(e).splitlines()[1].strip()[:110])
+        with_bounds = dict(one, bounds={"min": lm["bounds"]["min"], "max": lm["bounds"]["max"]})
+        warned = b.call("sector.build", project=project, name="probe_mod_bounds", scene={"format": 1, "objects": [with_bounds]})
+        assert warned["nodes"] == 1 and any("needs the mod" in w for w in warned["warnings"]), warned
+        print("   no root, scene bounds: warning:", warned["warnings"][0][:110])
+
+        # A mod archive in the game's mod folder with a mesh or entity the game does not have, if there is one.
+        found = None
+        for f in mod_archives:
+            for item in b.call("archive.openMod", path=os.path.join(mods_dir, f))["items"]:
+                if item["name"].endswith((".mesh", ".ent")) and not b.call("mesh.infoMany", paths=[item["name"]])[0]["error"] is None:
+                    found = (os.path.join(mods_dir, f), item["name"])
+                    break
+            if found:
+                break
+        if found:
+            am = step(f"mesh.info (from {os.path.basename(found[0])})", lambda: b.call("mesh.info", path=found[1], archive=found[0]))
+            assert am["error"] is None and am["type"] in ("mesh", "entity"), am
+            if am["parts"]:
+                print("   parts:", [(p["mesh"].split("\\")[-1], p["bounds"] is not None, (p["error"] or "")[:50]) for p in am["parts"]][:5])
+        else:
+            print("   mesh.info from a mod archive: no mod mesh or entity outside the game's archives, skipped")
     else:
         print("   mesh.info / sector.build: no cargo_crate mesh and entity found, skipped")
 

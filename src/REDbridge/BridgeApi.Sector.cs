@@ -99,11 +99,16 @@ public sealed partial class BridgeApi
     /// <paramref name="sceneFile"/> or <paramref name="scene"/> gives the scene; <paramref name="name"/>
     /// names the files and defaults to the scene's name; <paramref name="margin"/> is added around the
     /// nodes' bounds for the streaming box and defaults to the largest streaming range, at least 100.
+    /// <paramref name="archive"/> (a mod's .archive) and <paramref name="root"/> (a folder of loose
+    /// files, such as a project's source\archive) are searched before the game's archives for the
+    /// objects' resources (issue #12). A resource found nowhere is an error, or a warning that names
+    /// it when the scene gives the object's bounds: the game then needs the mod that has it.
     /// Nothing is written when validation fails.
     /// </summary>
     [JsonRpcMethod("sector.build")]
-    public SectorBuildResult BuildSector(string project, string? name = null, string? sceneFile = null, JsonElement? scene = null, float? margin = null)
+    public SectorBuildResult BuildSector(string project, string? name = null, string? sceneFile = null, JsonElement? scene = null, float? margin = null, string? archive = null, string? root = null)
     {
+        using var mods = ModFiles.Open(_host, archive, root);
         var sceneText = sceneFile is not null ? File.ReadAllText(sceneFile) : scene?.GetRawText() ?? throw new ArgumentException("sceneFile or scene is required");
         var model = JsonSerializer.Deserialize<Scene>(sceneText, SceneJson) ?? throw new InvalidDataException("The scene is not JSON");
         var projectDir = project.EndsWith(".cpmodproj", StringComparison.OrdinalIgnoreCase) ? Path.GetDirectoryName(Path.GetFullPath(project))! : Path.GetFullPath(project);
@@ -131,7 +136,9 @@ public sealed partial class BridgeApi
         var gameLoaded = _host.GameDir is not null;
         if (!gameLoaded)
         {
-            warnings.Add("No game loaded: resources were not checked and bounds not read; nodes without bounds get a 1 m box");
+            warnings.Add(mods.IsEmpty
+                ? "No game loaded: resources were not checked and bounds not read; nodes without bounds get a 1 m box"
+                : $"No game loaded: resources were not checked, and bounds were read only from {mods.Where}; nodes without bounds get a 1 m box");
         }
         for (var i = 0; i < model.Objects.Count; i++)
         {
@@ -158,9 +165,17 @@ public sealed partial class BridgeApi
             {
                 errors.Add($"{label}: the reference '{o.Ref}' is used twice");
             }
-            if (gameLoaded && !string.IsNullOrEmpty(o.Resource) && !_host.Archives.Lookup(o.Resource.Replace('/', '\\')).HasValue)
+            if (gameLoaded && !string.IsNullOrEmpty(o.Resource) && !_host.Archives.Lookup(o.Resource.Replace('/', '\\')).HasValue && !mods.Has(o.Resource))
             {
-                errors.Add($"{label}: '{o.Resource}' is not in the game's archives");
+                var where = mods.IsEmpty ? "the game's archives" : $"{mods.Where}, nor in the game's archives";
+                if (o.Bounds is null)
+                {
+                    errors.Add($"{label}: '{o.Resource}' is not in {where}; give the scene its bounds, or pass the mod's archive or root");
+                }
+                else
+                {
+                    warnings.Add($"{label}: '{o.Resource}' is not in {where}; the scene's bounds are used, and the game needs the mod that has it");
+                }
             }
         }
         if (errors.Count > 0)
@@ -188,7 +203,7 @@ public sealed partial class BridgeApi
         for (var i = 0; i < model.Objects.Count; i++)
         {
             var o = model.Objects[i];
-            var local = o.Bounds ?? (gameLoaded && o.Kind != "light" ? TryReadBounds(o.Resource!, warnings) : null) ?? new Bounds([-0.5f, -0.5f, 0f], [0.5f, 0.5f, 1f]);
+            var local = o.Bounds ?? ((gameLoaded || !mods.IsEmpty) && o.Kind != "light" ? TryReadBounds(o.Resource!, mods, warnings) : null) ?? new Bounds([-0.5f, -0.5f, 0f], [0.5f, 0.5f, 1f]);
             var world = o.Kind == "light" ? PointBounds(o.Transform.Position) : WorldBounds(local, o.Transform);
             var size = Math.Max(Math.Max(world.Max[0] - world.Min[0], world.Max[1] - world.Min[1]), world.Max[2] - world.Min[2]);
             var primary = o.Streaming?.Primary ?? Math.Clamp(size * 11f, 40f, 400f);
@@ -330,11 +345,11 @@ public sealed partial class BridgeApi
     private static float[] Prop(Dictionary<string, JsonElement> p, string key, float[] fallback) =>
         p.TryGetValue(key, out var v) && v.ValueKind == JsonValueKind.Array && v.GetArrayLength() == fallback.Length ? v.EnumerateArray().Select(e => e.GetSingle()).ToArray() : fallback;
 
-    private Bounds? TryReadBounds(string resource, List<string> warnings)
+    private Bounds? TryReadBounds(string resource, ModFiles mods, List<string> warnings)
     {
         try
         {
-            var info = InfoOf(Find(resource));
+            var info = InfoOf(resource, mods);
             if (info.Bounds is null)
             {
                 warnings.Add($"{resource}: no bounds in the file; a 1 m box is used");

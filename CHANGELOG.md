@@ -12,7 +12,21 @@ How to keep it:
 
 ## Unreleased
 
+### New
+
+- **`mesh.info`, `mesh.infoMany` and `sector.build` read mods** (issue #12, https://github.com/Edgemodders/REDbridge/issues/12), for EDGEbuilder's Browse of mod assets. Two optional parameters name where to look before the game's archives: `archive`, a mod's `.archive` anywhere on disk, and `root`, a folder of loose files laid out as in an archive, such as a REDcode project's `source\archive`. The answer is the same as for a game file, and an entity's parts are looked up the same way, so a part may be in the mod or in the game.
+
+  ```json
+  { "method": "mesh.infoMany", "params": { "paths": ["edgefab\\chair\\chair.mesh"], "archive": "E:\\...\\archive\\pc\\mod\\edgefab_chair.archive" } }
+  { "method": "mesh.infoMany", "params": { "paths": ["edgefab\\chair\\chair.mesh"], "root": "E:\\...\\MyMod\\source\\archive" } }
+  ```
+
+  The archive is opened for the call and closed after it, so REDcode or WolvenKit can pack the mod again in between; reading a mod archive's index takes a few milliseconds.
+- **An entity's part that could not be read** now says why, in the part's new `error` field, and has no bounds.
+
 ### Changed
+
+- **`sector.build` takes a resource that is not in the game's archives** when the scene gives the object's `bounds`: a warning names the resource, so an editor can say which mods the bake needs. Without bounds, or without `archive` or `root` that has it, it is still refused, and the message says what to give.
 
 - **`sector.build` writes the `.xl` in ArchiveXL's `streaming: blocks:` form** (issue #13, https://github.com/Edgemodders/REDbridge/issues/13), the form EDGEbuilder's bake probe loaded in game 2.5 with ArchiveXL 1.28.6, instead of a resource patch of the world's `all.streamingblock`:
 
