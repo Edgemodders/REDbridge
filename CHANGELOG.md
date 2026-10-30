@@ -12,6 +12,18 @@ How to keep it:
 
 ## Unreleased
 
+### Changed
+
+- **`sector.build` writes the `.xl` in ArchiveXL's `streaming: blocks:` form** (issue #13, https://github.com/Edgemodders/REDbridge/issues/13), the form EDGEbuilder's bake probe loaded in game 2.5 with ArchiveXL 1.28.6, instead of a resource patch of the world's `all.streamingblock`:
+
+  ```yaml
+  streaming:
+    blocks:
+      - edgebuilder\<name>\<name>.streamingblock
+  ```
+
+- **The file is now `<name>.archive.xl`**, so it sits beside `<name>.archive` when the project is packed under that mod name. A `<name>.xl` written by an earlier `sector.build` is removed, with a warning, so the block is not added twice; one that REDbridge did not write is left alone.
+
 ## 0.11.0 (2026-10-26)
 
 ### Changed

@@ -13,8 +13,9 @@ namespace REDbridge;
 
 /// <summary>
 /// Bakes an EDGEbuilder scene into game files: one streaming sector with a node per object, one
-/// streaming block whose descriptor holds the sector's streaming box, and an ArchiveXL file that
-/// patches the block into the world. Written with WolvenKit's own writers into a REDcode project,
+/// streaming block whose descriptor holds the sector's streaming box, and an ArchiveXL file,
+/// <c>&lt;name&gt;.archive.xl</c>, that adds the block to the world under <c>streaming: blocks:</c>
+/// (the form EDGEbuilder's bake probe loaded in game 2.5 with ArchiveXL 1.28.6, issue #13). Written with WolvenKit's own writers into a REDcode project,
 /// under source/archive (game files) and source/resources (the .xl). Asked for by EDGEbuilder (issue #1).
 ///
 /// The node-data fields follow base-game 2.5 sectors of the same node types: node flags, streaming
@@ -92,7 +93,6 @@ public sealed partial class BridgeApi
 
     private const uint NodeDataBufferFlags = 7471104; // as on base-game 2.5 sectors
     private const int SectorVersion = 68; // as on base-game 2.5 sectors
-    private const string WorldBlock = @"base\worlds\03_night_city\_compiled\default\blocks\all.streamingblock";
 
     /// <summary>
     /// Bakes a scene. <paramref name="project"/> is a REDcode project folder (or its .cpmodproj);
@@ -264,9 +264,20 @@ public sealed partial class BridgeApi
         var archiveDir = Path.Combine(projectDir, "source", "archive");
         var sectorFile = WriteCr2w(Path.Combine(archiveDir, sectorPath), sector);
         var blockFile = WriteCr2w(Path.Combine(archiveDir, blockPath), block);
-        var xlFile = Path.Combine(projectDir, "source", "resources", "archive", "pc", "mod", safeName + ".xl");
-        Directory.CreateDirectory(Path.GetDirectoryName(xlFile)!);
+        // Named <name>.archive.xl, so it sits beside <name>.archive when the project is packed
+        // under that mod name: the pairing EDGEbuilder's bake probe loaded in game 2.5 (issue #13).
+        var xlDir = Path.Combine(projectDir, "source", "resources", "archive", "pc", "mod");
+        var xlFile = Path.Combine(xlDir, safeName + ".archive.xl");
+        Directory.CreateDirectory(xlDir);
         File.WriteAllText(xlFile, XlFor(safeName, blockPath), new UTF8Encoding(false));
+        // Before 0.12.0 the file was <name>.xl with a resource patch; left beside the new one it
+        // would add the block a second time, so it goes when it is ours.
+        var oldXl = Path.Combine(xlDir, safeName + ".xl");
+        if (File.Exists(oldXl) && File.ReadLines(oldXl).FirstOrDefault()?.StartsWith("# Written by REDbridge sector.build") == true)
+        {
+            File.Delete(oldXl);
+            warnings.Add($"Removed {safeName}.xl, written by an earlier sector.build; {safeName}.archive.xl replaces it");
+        }
         _host.Log.Info($"sector.build {safeName}: {model.Objects.Count} nodes -> {sectorFile}");
         return new SectorBuildResult(safeName, sectorFile, blockFile, xlFile, sectorPath, blockPath, model.Objects.Count, streamingBox, warnings);
     }
@@ -395,10 +406,9 @@ public sealed partial class BridgeApi
         $"""
         # Written by REDbridge sector.build for the EDGEbuilder scene "{name}".
         # ArchiveXL merges this streaming block into the world's, so the sector it names streams in.
-        resource:
-          patch:
-            {blockPath}:
-              - {WorldBlock}
+        streaming:
+          blocks:
+            - {blockPath}
 
         """;
 }

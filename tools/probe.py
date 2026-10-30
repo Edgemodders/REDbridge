@@ -145,7 +145,12 @@ def main():
         blockBack = step("cr2w.fileToJson (the block reads back)", lambda: b.call("cr2w.fileToJson", file=built["block"]))
         desc = json.loads(blockBack["json"])["Data"]["RootChunk"]["descriptors"]
         assert len(desc) == 1 and desc[0]["data"]["DepotPath"]["$value"].endswith("probe_scene.streamingsector"), desc
-        print("   streaming box", built["streamingBox"], "xl:", open(built["xl"], encoding="utf-8").read().strip().splitlines()[-3:])
+        # ArchiveXL's streaming: blocks: form in <name>.archive.xl, as EDGEbuilder's bake probe loaded in game 2.5 (issue #13).
+        xl_lines = open(built["xl"], encoding="utf-8").read().strip().splitlines()
+        assert built["xl"].endswith("probe_scene.archive.xl"), built["xl"]
+        assert xl_lines[-3:] == ["streaming:", "  blocks:", "    - " + built["blockPath"]], xl_lines
+        assert not os.path.exists(os.path.join(os.path.dirname(built["xl"]), "probe_scene.xl")), "the old probe_scene.xl is still there"
+        print("   streaming box", built["streamingBox"], "xl:", xl_lines[-3:], "warnings:", built["warnings"])
         # Validation refuses a bad scene and writes nothing.
         try:
             b.call("sector.build", project=project, name="bad", scene={"format": 1, "objects": [{"id": "x", "kind": "mesh", "resource": "base\\nope.mesh"}, {"id": "x", "kind": "thing"}]})
