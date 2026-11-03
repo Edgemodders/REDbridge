@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://edgemodders.github.io/REDbridge/"><img src="docs/assets/brand/badges/docs.svg" alt="docs: read the docs"></a>
-  <img src="docs/assets/brand/badges/status.svg" alt="status: in use">
+  <img src="docs/assets/brand/badges/status.svg" alt="status: 0.11.0 released">
   <img src="docs/assets/brand/badges/wolvenkit.svg" alt="WolvenKit: 10.0 beta">
   <img src="docs/assets/brand/badges/dotnet.svg" alt=".NET: 10">
   <a href="LICENSE"><img src="docs/assets/brand/badges/license.svg" alt="license: GPL-3.0"></a>
@@ -17,7 +17,7 @@ REDbridge runs [WolvenKit](https://github.com/WolvenKit/WolvenKit)'s headless C#
 **[Read the docs](https://edgemodders.github.io/REDbridge/)** &middot; [REDcode](https://github.com/Edgemodders/REDcode) &middot; [REDnode](https://github.com/Edgemodders/REDnode)
 
 > [!NOTE]
-> **Status: released and in use.** The latest release is [0.11.0](https://github.com/Edgemodders/REDbridge/releases/latest), built with WolvenKit 10.0.0-beta.1, for game **2.5** (out on 2026-10-22). Game 2.31's streaming sectors no longer read right with it; use 0.10.0 (WolvenKit 9.1.0) for those. See [issue #10](https://github.com/Edgemodders/REDbridge/issues/10) and the [changelog](CHANGELOG.md). `tools/probe.py` runs every method against a real install.
+> **Status: 0.11.0 released on 2026-10-26**, and in use: [0.11.0](https://github.com/Edgemodders/REDbridge/releases/tag/v0.11.0) is built with WolvenKit 10.0.0-beta.1, for game **2.5** (out on 2026-10-22). It added spoken lines to `loc.*`, texture setups for `project.import` and `mesh.items`. Game 2.31's streaming sectors no longer read right with it; use 0.10.0 (WolvenKit 9.1.0) for those. See [issue #10](https://github.com/Edgemodders/REDbridge/issues/10) and the [changelog](CHANGELOG.md). `tools/probe.py` runs every method against a real install.
 
 ## Get REDbridge
 
