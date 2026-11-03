@@ -8,8 +8,10 @@
 #   Run workflow, "Make a release" ticked       also tags the commit v<version> and makes the GitHub
 #                                               release with the zip; stops first if that tag exists
 #                                               (raise <Version> in src/REDbridge/REDbridge.csproj),
-#                                               if it is not run on main, or if CHANGELOG.md has no
-#                                               section for the version (tools/release-notes.mjs)
+#                                               if it is not run on main, if CHANGELOG.md has no
+#                                               section for the version (tools/release-notes.mjs),
+#                                               or if README.md's status line and badge do not say
+#                                               the version (tools/release/readme-check.mjs)
 #   npm run release                             the same as ticking the box, from a terminal
 #
 # Release gate: the probe and REDcode's smoke test need the game, so they run on a machine with
@@ -62,6 +64,11 @@ jobs:
               exit 1
             fi
           fi
+
+      # Before anything is built: a README that does not say the version stops a release here.
+      - name: The README says this release
+        if: inputs.release
+        run: node tools/release/readme-check.mjs --version "${VERSION}"
 
       # Before anything is built: no CHANGELOG.md section for the version stops a release here.
       - name: Release notes from CHANGELOG.md
