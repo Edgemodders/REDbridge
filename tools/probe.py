@@ -65,7 +65,8 @@ def main():
     def step(name, fn):
         s = time.time()
         r = fn()
-        print(f"[{time.time() - s:6.2f}s] {name}: {r}")
+        text = str(r)
+        print(f"[{time.time() - s:6.2f}s] {name}: {text if len(text) <= 600 else text[:600] + f' ... ({len(text):,} characters)'}")
         return r
 
     info = step("bridge.info", lambda: b.call("bridge.info"))
@@ -151,6 +152,13 @@ def main():
         assert xl_lines[-3:] == ["streaming:", "  blocks:", "    - " + built["blockPath"]], xl_lines
         assert not os.path.exists(os.path.join(os.path.dirname(built["xl"]), "probe_scene.xl")), "the old probe_scene.xl is still there"
         print("   streaming box", built["streamingBox"], "xl:", xl_lines[-3:], "warnings:", built["warnings"])
+        # sector.nodes reads the baked sector back from the project's loose files (issues #11 and #12).
+        mine = step("sector.nodes (the baked sector, root)", lambda: b.call("sector.nodes", path=built["sectorPath"], root=os.path.join(project, "source", "archive")))
+        assert [i["kind"] for i in mine["items"]] == ["worldMeshNode", "worldEntityNode", "worldStaticLightNode"], mine["items"]
+        first = mine["items"][0]
+        assert first["resource"] == mesh["name"] and first["ref"] == "edgebuilder/probe_scene/crate_a" and first["hash"] == crate_ref, first
+        assert [round(v, 3) for v in first["transform"]["position"]] == [-1200.0, 1500.0, 20.0], first["transform"]
+        assert mine["items"][1]["resource"] == ent["name"] and mine["items"][1]["streaming"] == {"primary": 120, "secondary": 100}, mine["items"][1]
         # Validation refuses a bad scene and writes nothing.
         try:
             b.call("sector.build", project=project, name="bad", scene={"format": 1, "objects": [{"id": "x", "kind": "mesh", "resource": "base\\nope.mesh"}, {"id": "x", "kind": "thing"}]})
@@ -207,6 +215,37 @@ def main():
             print("   mesh.info from a mod archive: no mod mesh or entity outside the game's archives, skipped")
     else:
         print("   mesh.info / sector.build: no cargo_crate mesh and entity found, skipped")
+
+    # sector.find and sector.nodes (issue #11, for EDGEbuilder's world map and inspector): the world's sectors and a sector's nodes.
+    every = step("sector.find (reads both streaming blocks)", lambda: b.call("sector.find"))
+    secs = every["sectors"]
+    assert every["total"] > 20000 and {"exterior", "interior", "quest"} <= {s["kind"] for s in secs}, every["total"]
+    assert {s["block"] for s in secs} == {"base", "ep1"}, {s["block"] for s in secs}
+    gridded = [s for s in secs if s["grid"]]
+    assert gridded and all(s["path"].endswith(f"_{s['level']}.streamingsector") for s in gridded), "a grid name and its level disagree"
+    print(f"   {every['total']} sectors, {len(gridded)} with a grid; first:", {k: secs[0][k] for k in ("path", "kind", "grid", "level", "block", "archive")})
+    near = step("sector.find (a box in Little China, exterior)", lambda: b.call("sector.find", box={"min": [-1700, 1200, 0], "max": [-1650, 1250, 50]}, kinds=["exterior"], levels=[0]))
+    assert near["total"] > 0 and all(s["kind"] == "exterior" and s["level"] == 0 for s in near["sectors"]), near["total"]
+    busiest = max(near["sectors"][:12], key=lambda s: b.call("sector.nodes", path=s["path"], kinds=["worldInstancedMeshNode"])["total"])
+    nodes = step(f"sector.nodes {busiest['path'].split(chr(92))[-1]} (bounds)", lambda: b.call("sector.nodes", path=busiest["path"], bounds=True))
+    items = nodes["items"]
+    assert items and all(len(i["transform"]["position"]) == 3 and len(i["transform"]["rotation"]) == 4 for i in items)
+    inst = [i for i in items if i["instances"]]
+    assert inst, "no instanced mesh in the busiest sector"
+    outside = 0
+    for e in inst:
+        mn, mx = e["bounds"]["min"], e["bounds"]["max"]
+        outside += sum(1 for c in e["instances"] if any(c["position"][k] < mn[k] - 5 or c["position"][k] > mx[k] + 5 for k in range(3)))
+    assert outside == 0, f"{outside} instanced copies lie outside the box the sector keeps for them"
+    shown = [i for i in items if i["resource"]]
+    print(f"   {nodes['total']} entries of {nodes['nodes']} nodes, {len(shown)} with a resource, {sum(len(i['instances']) for i in inst)} instanced copies, {sum(1 for i in items if i['ref'])} refs")
+    only = b.call("sector.nodes", path=busiest["path"], kinds=["entityNode", "worldCookedStaticMeshNode"])
+    assert only["items"] and {i["kind"] for i in only["items"]} <= {"worldEntityNode", "worldCookedStaticMeshNode"}, {i["kind"] for i in only["items"]}
+    try:
+        b.call("sector.nodes", path=mesh["name"] if mesh else "base\\nope.streamingsector")
+        raise AssertionError("sector.nodes took a file that is not a sector")
+    except RuntimeError as e:
+        print("   not a sector:", str(e)[:90])
 
     # loc.searchLines, loc.lines and loc.newLinesFile (issue #9, for EDGEquest): spoken lines with their voice-over and length.
     found = step("loc.searchLines 'choom' (builds the index)", lambda: (lambda r: (r["total"], r["items"][0]))(b.call("loc.searchLines", query="choom", language="en-us", limit=50)))

@@ -53,7 +53,7 @@ Every method, by group. Each name is `<group>.<method>`, for example `archive.li
 | `cr2w` | toJson, fromJson, fileToJson; document sessions: open, getNode, getNodes, search, patch, save, close, documents, describeType, createInstance | WolvenKit.RED4, WolvenKit.Common |
 | `texture` | toPng (a game texture), fileToPng (an `.xbm` on disk), imageToPng (a plain TGA, DDS, TIFF, BMP, JPG or PNG to PNG, for viewing). Meshes to glTF and sounds to WAV go through `project.export` | WolvenKit.Common |
 | `mesh` | info, infoMany: a mesh's or an entity template's bounds and appearance names, for an asset index; from the game, a mod's `.archive` (`archive`) or a folder of loose files (`root`, such as a project's `source\archive`) | WolvenKit.RED4 |
-| `sector` | build: an EDGEbuilder scene into a streaming sector, a streaming block and an ArchiveXL file in a REDcode project; its resources may be in a mod's `.archive` or a folder of loose files too (`archive`, `root`) | WolvenKit.RED4 |
+| `sector` | build: an EDGEbuilder scene into a streaming sector, a streaming block and an ArchiveXL file in a REDcode project; its resources may be in a mod's `.archive` or a folder of loose files too (`archive`, `root`). find: the game's streaming sectors with their boxes, filtered by a box, kinds and levels; nodes: one sector's placed things with world transforms, resources, references and streaming ranges, instanced meshes unpacked into one placement per copy | WolvenKit.RED4 |
 | `project` | pack (a folder into `<modName>.archive` through WolvenKit's packer, with warnings for paths with capital letters or spaces); export (a file under `source/archive` to the same path under `source/raw`: glTF, an image, WAV and so on) and import (back again, an existing texture keeping all its settings; a GLB over a `template` mesh for a new asset, 0.9.0; an image with a `texture` setup, a preset `color`, `normal` or `grayscale` or the setup's fields, reporting the setup written), each listing the files written | WolvenKit.Modkit |
 | `tweakdb` | types, records (by type, subtypes included, or path prefix, with chosen flats and LocKey text), record, flat, search, names (ids to paths, no load needed). Read offline from the game's `tweakdb_ep1.bin`, loaded on the first call in about 12 s | WolvenKit.RED4 |
 | `sound` | events: the sound event names WolvenKit knows, with their Wwise hashes, which name the event groups in `sfx_container.opusinfo`; importWavs: override game sound effects in a project from `<hash>.wav` files, writing the changed `.opuspak` files and a new index into its `source/archive` (0.9.0) | WolvenKit.Modkit's `soundEvents.json`, `OpusInfo` and opus-tools |
@@ -61,7 +61,7 @@ Every method, by group. Each name is `<group>.<method>`, for example `archive.li
 | `hash` | fnv1a64, resolve | WolvenKit.Core |
 | `script` | not planned: REDcode dropped its script runner | |
 
-The spoken lines (`loc.lines`, `loc.searchLines`, `loc.projectLinesFiles`, `loc.newLinesFile`) and `project.import`'s `texture` setup are on `main`, not yet in a release, and not yet tried in the game.
+`sector.find`, `sector.nodes`, and the `archive` and `root` of `mesh.info` and `sector.build` are on `main`, not yet in a release.
 
 ## Talking to the bridge
 

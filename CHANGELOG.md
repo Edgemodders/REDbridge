@@ -14,6 +14,16 @@ How to keep it:
 
 ### New
 
+- **`sector.find` and `sector.nodes`** (issue #11, https://github.com/Edgemodders/REDbridge/issues/11), for EDGEbuilder's world map, sector view and in-game inspector.
+  - `sector.find({ box?, kinds?, levels? })` lists the streaming sectors of Night City's two streaming blocks, the base game's and Phantom Liberty's (26,347 in game 2.5): each with its path, kind (`exterior`, `interior`, `quest`, `navigation`, `alwaysLoaded`), grid and level from names like `exterior_-12_-7_0_1`, streaming box, the block that lists it, the archive it is in and its number of variants. Optionally only those whose box meets `box`, of the given kinds and levels. The list is read once per bridge, in about 2.5 s, and kept: later calls take milliseconds.
+  - `sector.nodes(path, { kinds?, bounds?, archive?, root? })` lists one sector's placed things, one item per node-data entry: the node's class, its reference path when known, its global node id, the resource it shows (mesh, entity template, decal material, effect, ...) and appearance, the world transform, its streaming ranges, and for instanced meshes one world placement per copy. Game 2.5's cooked nodes hold several meshes each; every item names its own. With `bounds: true` every mesh item has a world box (each mesh read once per bridge); instanced meshes always have the one the sector keeps. `archive` and `root` read a mod's sector, as for `mesh.info`.
+
+  ```json
+  { "method": "sector.find", "params": { "box": { "min": [-1700, 1200, 0], "max": [-1650, 1250, 50] }, "kinds": ["exterior"] } }
+  { "method": "sector.nodes", "params": { "path": "base\\worlds\\03_night_city\\_compiled\\default\\exterior_-25_18_0_0.streamingsector", "bounds": true } }
+  ```
+
+  Phantom Liberty's sectors have their own paths (`...\default\ep1\...`), so none replaces a base sector of the same path in 2.5 (`replaces` is false for all). Mod sectors are read by `sector.nodes` only; `sector.find` lists the game's.
 - **`mesh.info`, `mesh.infoMany` and `sector.build` read mods** (issue #12, https://github.com/Edgemodders/REDbridge/issues/12), for EDGEbuilder's Browse of mod assets. Two optional parameters name where to look before the game's archives: `archive`, a mod's `.archive` anywhere on disk, and `root`, a folder of loose files laid out as in an archive, such as a REDcode project's `source\archive`. The answer is the same as for a game file, and an entity's parts are looked up the same way, so a part may be in the mod or in the game.
 
   ```json
