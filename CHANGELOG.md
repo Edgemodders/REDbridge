@@ -12,6 +12,8 @@ How to keep it:
 
 ## Unreleased
 
+## 0.12.0 (2026-11-05)
+
 ### New
 
 - **`sector.find` and `sector.nodes`** (issue #11, https://github.com/Edgemodders/REDbridge/issues/11), for EDGEbuilder's world map, sector view and in-game inspector.

@@ -13,7 +13,7 @@ DIM = "#8a93a8"
 COLORS = {"yellow": "#fcee0a", "cyan": "#19f3ff", "green": "#5dffa1"}
 
 BADGES = [
-    ('status', 'status', '0.11.0 released', 'green'),
+    ('status', 'status', '0.12.0 released', 'green'),
     ('wolvenkit', 'wolvenkit', '10.0 beta', 'cyan'),
     ('dotnet', 'dotnet', '10', 'cyan'),
     ('license', 'license', 'GPL-3.0', 'green'),

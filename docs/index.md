@@ -1,6 +1,6 @@
 # RED<span class="y">bridge</span> docs
 
-REDbridge hosts WolvenKit's engine in a local process and exposes it over JSON-RPC to REDcode, EDGEdeck, REDnode, other Edgemodders tools and AI assistants. The latest release is [0.11.0](https://github.com/Edgemodders/REDbridge/releases/latest), for game 2.5 (0.10.0 for game 2.31).
+REDbridge hosts WolvenKit's engine in a local process and exposes it over JSON-RPC to REDcode, EDGEdeck, REDnode, other Edgemodders tools and AI assistants. The latest release is [0.12.0](https://github.com/Edgemodders/REDbridge/releases/latest), for game 2.5 (0.10.0 for game 2.31).
 
 | Document | What it covers |
 |---|---|
