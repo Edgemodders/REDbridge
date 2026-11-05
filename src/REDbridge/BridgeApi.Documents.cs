@@ -569,7 +569,7 @@ public sealed partial class BridgeApi
                         total++;
                         if (hits.Count < limit)
                         {
-                            hits.Add(new SearchHit(nodePath, TypeNameOf(node), text.Length > 80 ? text[..77] + "..." : text));
+                            hits.Add(new SearchHit(nodePath, TypeNameOf(node), Shorten(text)));
                         }
                     }
                     return;
@@ -580,6 +580,9 @@ public sealed partial class BridgeApi
         return new SearchResult(total, total > hits.Count, hits);
     }
 
+    /// <summary>Long text cut in the middle, so a path keeps its file name.</summary>
+    private static string Shorten(string text) => text.Length > 80 ? text[..30] + "..." + text[^47..] : text;
+
     private static string Join(string parent, string child) => parent.Length == 0 ? child : $"{parent}.{child}";
 
     /// <summary>A leaf as the text a person would search for: resolved names and paths, enum names, numbers.</summary>
@@ -587,7 +590,11 @@ public sealed partial class BridgeApi
     {
         CName n => n.GetResolvedText() ?? n.ToString() ?? "",
         ResourcePath p => p.GetResolvedText() ?? p.ToString() ?? "",
+        // A reference as its path (or its hash, unnamed), without the type and hash its ToString adds.
+        IRedRef r => r.DepotPath.GetResolvedText() ?? ((ulong)r.DepotPath).ToString(CultureInfo.InvariantCulture),
         IRedEnum e => e.ToEnumString(),
+        // A material's values (MultilayerSetup, GlobalNormal, ...): the key and what it holds, such as a .mlsetup path.
+        CKeyValuePair kv => $"{kv.Key.GetResolvedText() ?? kv.Key.ToString()}: {(kv.Value is null ? "" : LeafText(kv.Value))}",
         _ => leaf.ToString() ?? "",
     };
 

@@ -48,6 +48,11 @@ How to keep it:
 
 - **The file is now `<name>.archive.xl`**, so it sits beside `<name>.archive` when the project is packed under that mod name. A `<name>.xl` written by an earlier `sector.build` is removed, with a warning, so the block is not added twice; one that REDbridge did not write is left alone.
 
+### Fixed
+
+- **`cr2w.search` finds a material's values** (REDcode issue #20, https://github.com/Edgemodders/REDcode/issues/20): a search for `mlsetup`, a setup's file name or `MultilayerSetup` now finds them in a mesh's `localMaterialBuffer.materials.<n>.values`, where it found nothing before. A hit's preview is `MultilayerSetup: <path>`.
+- **`cr2w.search` previews end with the file name**: a long preview is cut in the middle, not at the end, and a reference shows its path alone, without its type and hash.
+
 ## 0.11.0 (2026-10-26)
 
 ### Changed
