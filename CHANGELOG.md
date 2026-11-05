@@ -51,6 +51,7 @@ How to keep it:
 ### Fixed
 
 - **`cr2w.search` finds a material's values** (REDcode issue #20, https://github.com/Edgemodders/REDcode/issues/20): a search for `mlsetup`, a setup's file name or `MultilayerSetup` now finds them in a mesh's `localMaterialBuffer.materials.<n>.values`, where it found nothing before. A hit's preview is `MultilayerSetup: <path>`.
+- **`mesh.items` finds outfit sets, glasses, helmets, masks and more** (REDcode issue #17, https://github.com/Edgemodders/REDcode/issues/17): 23 of the 229 appearance files it reads were skipped, because some of their looks have no component list at all. Among them both outfit sets (`outfit\set_01.app`, base game and Phantom Liberty), every pair of glasses, several helmets and masks, food, drinks and two cyberware. The cop jacket's mesh now gives `Items.Cop_01_Set_Jacket` in its two looks, where it gave nothing.
 - **`cr2w.search` previews end with the file name**: a long preview is cut in the middle, not at the end, and a reference shows its path alone, without its type and hash.
 
 ## 0.11.0 (2026-10-26)

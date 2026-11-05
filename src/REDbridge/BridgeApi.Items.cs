@@ -138,9 +138,12 @@ public sealed partial class BridgeApi
             {
                 continue;
             }
-            var components = look.Components.Count > 0 ? look.Components.Cast<IRedType>()
+            // Outfit sets (base\characters\appearances\player\items\outfit\set_01.app) have looks whose
+            // components and overrides are null, not empty (REDcode #17): one such look skipped the file.
+            var components = look.Components is { Count: > 0 } own ? own.Cast<IRedType>()
                 : look.CompiledData?.Buffer?.Data is RedPackage package ? package.Chunks.Cast<IRedType>() : [];
-            var overrides = look.PartsOverrides.SelectMany(p => p.ComponentsOverrides)
+            var overrides = (look.PartsOverrides ?? []).Where(p => p?.ComponentsOverrides is not null).SelectMany(p => p.ComponentsOverrides)
+                .Where(o => o is not null)
                 .Where(o => o.MeshAppearance.GetResolvedText() is { Length: > 0 } a && a != "None")
                 .GroupBy(o => o.ComponentName.GetResolvedText() ?? "")
                 .ToDictionary(g => g.Key, g => g.Last().MeshAppearance.GetResolvedText()!);
