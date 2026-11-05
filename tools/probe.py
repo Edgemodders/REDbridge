@@ -159,6 +159,20 @@ def main():
         assert first["resource"] == mesh["name"] and first["ref"] == "edgebuilder/probe_scene/crate_a" and first["hash"] == crate_ref, first
         assert [round(v, 3) for v in first["transform"]["position"]] == [-1200.0, 1500.0, 20.0], first["transform"]
         assert mine["items"][1]["resource"] == ent["name"] and mine["items"][1]["streaming"] == {"primary": 120, "secondary": 100}, mine["items"][1]
+        # A solid mesh (issue #15): the node EDGEbuilder's probe proved in game, and whether the mesh can be solid.
+        assert isinstance(mi["hasCollision"], bool) and ei["hasCollision"] is None, (mi["hasCollision"], ei["hasCollision"])
+        solid_scene = {"format": 1, "name": "Probe Solid", "objects": [
+            {"id": "solid", "kind": "mesh", "resource": mesh["name"], "solid": True, "transform": {"position": [-1200.0, 1500.0, 20.0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]}},
+            {"id": "plain", "kind": "mesh", "resource": mesh["name"], "transform": {"position": [-1198.0, 1500.0, 20.0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]}},
+        ]}
+        solid = step("sector.build (solid: true)", lambda: b.call("sector.build", project=project, scene=solid_scene))
+        assert any("no collision data" in w for w in solid["warnings"]) == (not mi["hasCollision"]), (mi["hasCollision"], solid["warnings"])
+        solid_nodes = json.loads(b.call("cr2w.fileToJson", file=solid["sector"])["json"])["Data"]["RootChunk"]["nodes"]
+        assert [n["Data"]["$type"] for n in solid_nodes] == ["worldInstancedDestructibleMeshNode", "worldMeshNode"], solid_nodes
+        node = solid_nodes[0]["Data"]
+        assert node["simulationType"] == "Kinematic" and node["isDestructible"] == 0 and node["turnDynamicOnImpulse"] == 0, node
+        assert node["mesh"]["DepotPath"]["$value"] == mesh["name"] and len(node["instanceTransforms"]) == 1, node
+        print("   solid:", mesh["name"].split("\\")[-1], "has collision:", mi["hasCollision"], "warnings:", solid["warnings"])
         # Validation refuses a bad scene and writes nothing.
         try:
             b.call("sector.build", project=project, name="bad", scene={"format": 1, "objects": [{"id": "x", "kind": "mesh", "resource": "base\\nope.mesh"}, {"id": "x", "kind": "thing"}]})

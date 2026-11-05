@@ -17,7 +17,7 @@ REDbridge runs [WolvenKit](https://github.com/WolvenKit/WolvenKit)'s headless C#
 **[Read the docs](https://edgemodders.github.io/REDbridge/)** &middot; [REDcode](https://github.com/Edgemodders/REDcode) &middot; [REDnode](https://github.com/Edgemodders/REDnode)
 
 > [!NOTE]
-> **Status: 0.12.0 released on 2026-11-05**, and in use: [0.12.0](https://github.com/Edgemodders/REDbridge/releases/tag/v0.12.0) is built with WolvenKit 10.0.0-beta.1, for game **2.5**. It adds `sector.find` and `sector.nodes`, lets `mesh.info` and `sector.build` read a mod's files, and writes the `.xl` in ArchiveXL's `streaming: blocks:` form. Game 2.31's streaming sectors no longer read right with it; use 0.10.0 (WolvenKit 9.1.0) for those. See [issue #10](https://github.com/Edgemodders/REDbridge/issues/10) and the [changelog](CHANGELOG.md). `tools/probe.py` runs every method against a real install.
+> **Status: 0.12.0 released on 2026-11-05**, and in use: [0.12.0](https://github.com/Edgemodders/REDbridge/releases/tag/v0.12.0) is built with WolvenKit 10.0.0-beta.1, for game **2.5**. It adds `sector.find` and `sector.nodes`, lets `mesh.info` and `sector.build` read a mod's files, bakes solid meshes, and writes the `.xl` in ArchiveXL's `streaming: blocks:` form. Game 2.31's streaming sectors no longer read right with it; use 0.10.0 (WolvenKit 9.1.0) for those. See [issue #10](https://github.com/Edgemodders/REDbridge/issues/10) and the [changelog](CHANGELOG.md). `tools/probe.py` runs every method against a real install.
 
 ## Get REDbridge
 

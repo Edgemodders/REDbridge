@@ -44,6 +44,8 @@ public sealed partial class BridgeApi
         /// <summary>The game path of the mesh or entity template; none for a light.</summary>
         public string? Resource { get; set; }
         public string? Appearance { get; set; }
+        /// <summary>A mesh that stops V, bullets and cars, baked as a kinematic instanced destructible mesh node (issue #15).</summary>
+        public bool Solid { get; set; }
         public SceneTransform Transform { get; set; } = new();
         public SceneStreaming? Streaming { get; set; }
         /// <summary>The node reference, unique in the scene. Generated from the id when missing.</summary>
@@ -178,6 +180,17 @@ public sealed partial class BridgeApi
                 }
             }
         }
+        foreach (var o in model.Objects.Where(o => o.Solid))
+        {
+            if (o.Kind != "mesh")
+            {
+                warnings.Add($"object '{o.Id}': solid is for a mesh; a {o.Kind}'s collision comes from what it is made of, so it is baked as usual");
+            }
+            else if (!string.IsNullOrEmpty(o.Resource) && (gameLoaded || !mods.IsEmpty) && CollisionOf(o.Resource, mods, warnings) == false)
+            {
+                warnings.Add($"object '{o.Id}': '{o.Resource}' has no collision data, so it shows but is not solid");
+            }
+        }
         if (errors.Count > 0)
         {
             throw new InvalidDataException($"The scene did not validate:\n  {string.Join("\n  ", errors)}");
@@ -303,6 +316,10 @@ public sealed partial class BridgeApi
         switch (o.Kind)
         {
             case "mesh":
+                if (o.Solid)
+                {
+                    return SolidMeshNode(o.Resource!, appearance);
+                }
                 return new worldMeshNode
                 {
                     Mesh = new CResourceAsyncReference<CMesh>(o.Resource!.Replace('/', '\\'), InternalEnums.EImportFlags.Soft),
@@ -333,6 +350,63 @@ public sealed partial class BridgeApi
             }
             default:
                 throw new InvalidDataException($"kind '{o.Kind}'");
+        }
+    }
+
+    /// <summary>
+    /// A mesh that stops V, bullets, melee and cars and stays put: the node EDGEbuilder's bake probe
+    /// proved in game 2.5 (round 3, issue #15). The masks are the game's World Dynamic preset. With
+    /// turnDynamicOnImpulse on, or as a worldDynamicMeshNode, V walks through; the mesh needs
+    /// meshMeshParamPhysics to be solid.
+    /// </summary>
+    private static worldInstancedDestructibleMeshNode SolidMeshNode(string resource, string appearance) => new()
+    {
+        Mesh = new CResourceAsyncReference<CMesh>(resource.Replace('/', '\\'), InternalEnums.EImportFlags.Soft),
+        MeshAppearance = appearance,
+        SimulationType = Enums.physicsSimulationType.Kinematic,
+        IsDestructible = false,
+        TurnDynamicOnImpulse = false,
+        StartInactive = false,
+        IsPierceable = false,
+        IsWorkspot = false,
+        UseAggregate = false,
+        EnableSelfCollisionInAggregate = false,
+        FilterDataSource = Enums.physicsFilterDataSource.Parent,
+        FilterData = new CHandle<physicsFilterData>(new physicsFilterData
+        {
+            Preset = "World Dynamic",
+            QueryFilter = new physicsQueryFilter { Mask1 = 0, Mask2 = 143753224 },
+            SimulationFilter = new physicsSimulationFilter { Mask1 = 114696, Mask2 = 9223372036854780879 },
+        }),
+        DamageThreshold = 1,
+        DamageEndurance = 30,
+        AccumulateDamage = true,
+        ImpulseToDamage = 1,
+        FracturingEffect = new CResourceAsyncReference<worldEffect>(0UL, InternalEnums.EImportFlags.Soft),
+        IdleEffect = new CResourceAsyncReference<worldEffect>(0UL, InternalEnums.EImportFlags.Soft),
+        StaticMesh = new CResourceAsyncReference<CMesh>(0UL, InternalEnums.EImportFlags.Soft),
+        StaticMeshAppearance = "None",
+        NavigationSetting = new NavGenNavigationSetting { NavmeshImpact = Enums.NavGenNavmeshImpact.Blocking },
+        UseMeshNavmeshSettings = true,
+        SystemsToNotifyFlags = 14,
+        InstanceTransforms = [new Transform { Position = new Vector4 { X = 0, Y = 0, Z = 0, W = 0 }, Orientation = new Quaternion { I = 0, J = 0, K = 0, R = 1 } }],
+    };
+
+    /// <summary>Whether a mesh has collision data; null, after a warning, when it cannot be read or is no mesh. A mesh found nowhere has its own warning.</summary>
+    private bool? CollisionOf(string resource, ModFiles mods, List<string> warnings)
+    {
+        if (!_host.Archives.Lookup(resource.Replace('/', '\\')).HasValue && !mods.Has(resource))
+        {
+            return null;
+        }
+        try
+        {
+            return InfoOf(resource, mods).HasCollision;
+        }
+        catch (Exception e)
+        {
+            warnings.Add($"{resource}: whether it has collision data was not read ({e.Message})");
+            return null;
         }
     }
 

@@ -26,8 +26,10 @@ public sealed partial class BridgeApi
     /// <see cref="Type"/> is "mesh" or "entity". <see cref="Bounds"/> is the mesh's bounding box, or
     /// for an entity the union of its mesh components' boxes placed at their local offsets (rotation
     /// of a component is ignored). <see cref="Appearances"/> are the names to choose from.
+    /// <see cref="HasCollision"/> is whether a mesh has collision data (<c>meshMeshParamPhysics</c>), which it
+    /// needs to be solid when baked (issue #15); null for an entity.
     /// </summary>
-    public sealed record MeshInfo(string Path, string Type, Bounds? Bounds, IReadOnlyList<string> Appearances, IReadOnlyList<MeshPart>? Parts, IReadOnlyList<string>? AppearanceResources, string? Error);
+    public sealed record MeshInfo(string Path, string Type, Bounds? Bounds, IReadOnlyList<string> Appearances, IReadOnlyList<MeshPart>? Parts, IReadOnlyList<string>? AppearanceResources, string? Error, bool? HasCollision = null);
 
     [JsonRpcMethod("mesh.info")]
     public MeshInfo MeshInfoOf(string path, string? archive = null, string? root = null)
@@ -61,11 +63,13 @@ public sealed partial class BridgeApi
         var (name, cr2w) = ReadResource(pathOrHash, mods);
         return cr2w.RootChunk switch
         {
-            CMesh mesh => new MeshInfo(name, "mesh", BoundsOf(mesh.BoundingBox), AppearanceNames(mesh), null, null, null),
+            CMesh mesh => new MeshInfo(name, "mesh", BoundsOf(mesh.BoundingBox), AppearanceNames(mesh), null, null, null, HasCollisionData(mesh)),
             entEntityTemplate ent => EntityInfoOf(name, ent, mods),
             var other => throw new InvalidDataException($"'{name}' is a {TypeNameOf(other)}, not a mesh or an entity template"),
         };
     }
+
+    private static bool HasCollisionData(CMesh mesh) => mesh.Parameters.Any(p => p.Chunk is meshMeshParamPhysics);
 
     private static List<string> AppearanceNames(CMesh mesh) =>
         mesh.Appearances.Select(a => a.Chunk?.Name.GetResolvedText() ?? "").Where(n => n.Length > 0 && n != "None").ToList();

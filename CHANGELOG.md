@@ -34,6 +34,13 @@ How to keep it:
   ```
 
   The archive is opened for the call and closed after it, so REDcode or WolvenKit can pack the mod again in between; reading a mod archive's index takes a few milliseconds.
+- **A solid mesh in `sector.build`** (issue #15, https://github.com/Edgemodders/REDbridge/issues/15), for EDGEbuilder's Solid switch. `"solid": true` on a scene's mesh writes a kinematic `worldInstancedDestructibleMeshNode` in place of `worldMeshNode`: it stops V, bullets, melee and cars, stays put, looks the same and takes an appearance. EDGEbuilder's bake probe proved this node in game 2.5, and `sector.build` writes the same bytes. Without `solid`, a bake stays as it was. A mesh with no collision data still bakes, with a warning that names it, since it shows but is not solid; `solid` on an entity or a light is a warning too, and they bake as usual.
+
+  ```json
+  { "id": "crate", "kind": "mesh", "resource": "base\\...\\cargo_crate_a.mesh", "solid": true, "transform": { } }
+  ```
+
+- **`mesh.info` and `mesh.infoMany` say `hasCollision`** (issue #15): true when a mesh has `meshMeshParamPhysics`, so an editor can say before a bake which objects cannot be solid. An entity's is null.
 - **An entity's part that could not be read** now says why, in the part's new `error` field, and has no bounds.
 
 ### Changed
