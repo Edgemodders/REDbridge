@@ -7,6 +7,7 @@ REDbridge hosts WolvenKit's engine in a local process and exposes it over JSON-R
 | [README](https://github.com/Edgemodders/REDbridge#readme) | How to get REDbridge, every method by group, how a client talks to it, what a mesh or texture import keeps |
 | [Changelog](https://github.com/Edgemodders/REDbridge/blob/main/CHANGELOG.md) | What changed in each release, with each method's parameters |
 | [Dev setup](dev-setup.md) | Every tool and step needed to build REDbridge on a new machine |
+| [Linux](linux.md) | A future task: what already runs on Linux, what does not, and the plan |
 
 ## Get REDbridge
 

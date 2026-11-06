@@ -24,3 +24,5 @@ nav:
     url: /
   - title: Dev setup
     url: /dev-setup.html
+  - title: Linux
+    url: /linux.html
