@@ -12,6 +12,8 @@ How to keep it:
 
 ## Unreleased
 
+## 0.12.1 (2026-11-08)
+
 ### Changed
 
 - **`sector.build`: a mesh's `streaming.primary` is also its hide distance** (issue #16, https://github.com/Edgemodders/REDbridge/issues/16). Mesh nodes, solid ones too, get `forceAutoHideDistance` set to the scene's `streaming.primary`, since the game otherwise hides a small mesh by its size whatever its streaming distance says (200 crates at 120 m vanished at about 60 m). With no `streaming` it stays 0 and the game decides, so bakes by size are as before.

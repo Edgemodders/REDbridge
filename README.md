@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://edgemodders.github.io/REDbridge/"><img src="docs/assets/brand/badges/docs.svg" alt="docs: read the docs"></a>
-  <img src="docs/assets/brand/badges/status.svg" alt="status: 0.12.0 released">
+  <img src="docs/assets/brand/badges/status.svg" alt="status: 0.12.1 released">
   <img src="docs/assets/brand/badges/wolvenkit.svg" alt="WolvenKit: 10.0 beta">
   <img src="docs/assets/brand/badges/dotnet.svg" alt=".NET: 10">
   <a href="LICENSE"><img src="docs/assets/brand/badges/license.svg" alt="license: GPL-3.0"></a>
@@ -17,7 +17,7 @@ REDbridge runs [WolvenKit](https://github.com/WolvenKit/WolvenKit)'s headless C#
 **[Read the docs](https://edgemodders.github.io/REDbridge/)** &middot; [REDcode](https://github.com/Edgemodders/REDcode) &middot; [REDnode](https://github.com/Edgemodders/REDnode)
 
 > [!NOTE]
-> **Status: 0.12.0 released on 2026-11-05**, and in use: [0.12.0](https://github.com/Edgemodders/REDbridge/releases/tag/v0.12.0) is built with WolvenKit 10.0.0-beta.1, for game **2.5**. It adds `sector.find` and `sector.nodes`, lets `mesh.info` and `sector.build` read a mod's files, bakes solid meshes, and writes the `.xl` in ArchiveXL's `streaming: blocks:` form. Game 2.31's streaming sectors no longer read right with it; use 0.10.0 (WolvenKit 9.1.0) for those. See [issue #10](https://github.com/Edgemodders/REDbridge/issues/10) and the [changelog](CHANGELOG.md). `tools/probe.py` runs every method against a real install.
+> **Status: 0.12.1 released on 2026-11-08**, and in use: [0.12.1](https://github.com/Edgemodders/REDbridge/releases/tag/v0.12.1) is built with WolvenKit 10.0.0-beta.1, for game **2.5**. It makes a baked mesh's streaming distance its hide distance too ([issue #16](https://github.com/Edgemodders/REDbridge/issues/16)). 0.12.0 added `sector.find` and `sector.nodes`, let `mesh.info` and `sector.build` read a mod's files, baked solid meshes, and wrote the `.xl` in ArchiveXL's `streaming: blocks:` form. Game 2.31's streaming sectors no longer read right with it; use 0.10.0 (WolvenKit 9.1.0) for those. See [issue #10](https://github.com/Edgemodders/REDbridge/issues/10) and the [changelog](CHANGELOG.md). `tools/probe.py` runs every method against a real install.
 
 ## Get REDbridge
 
