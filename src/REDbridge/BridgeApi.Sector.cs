@@ -66,7 +66,7 @@ public sealed partial class BridgeApi
 
     public sealed class SceneStreaming
     {
-        /// <summary>Metres. The distance the node streams in at (the node data's streamingDistance).</summary>
+        /// <summary>Metres. The distance the node streams in at (the node data's streamingDistance); for a mesh, also the distance it hides at (forceAutoHideDistance, issue #16).</summary>
         public float? Primary { get; set; }
         /// <summary>Metres. The node's secondary streaming distance (secondaryRefPointDistance); none means always.</summary>
         public float? Secondary { get; set; }
@@ -316,15 +316,22 @@ public sealed partial class BridgeApi
         switch (o.Kind)
         {
             case "mesh":
-                if (o.Solid)
+            {
+                var mesh = o.Solid
+                    ? SolidMeshNode(o.Resource!, appearance)
+                    : new worldMeshNode
+                    {
+                        Mesh = new CResourceAsyncReference<CMesh>(o.Resource!.Replace('/', '\\'), InternalEnums.EImportFlags.Soft),
+                        MeshAppearance = appearance,
+                    };
+                // The game hides a small mesh by its size whatever its streaming distance says, so a
+                // streaming distance from the scene is also the hide distance; 0 lets the game decide (issue #16).
+                if (o.Streaming?.Primary is float seenFrom)
                 {
-                    return SolidMeshNode(o.Resource!, appearance);
+                    mesh.ForceAutoHideDistance = seenFrom;
                 }
-                return new worldMeshNode
-                {
-                    Mesh = new CResourceAsyncReference<CMesh>(o.Resource!.Replace('/', '\\'), InternalEnums.EImportFlags.Soft),
-                    MeshAppearance = appearance,
-                };
+                return mesh;
+            }
             case "entity":
                 return new worldEntityNode
                 {

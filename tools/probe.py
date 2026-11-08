@@ -164,14 +164,20 @@ def main():
         solid_scene = {"format": 1, "name": "Probe Solid", "objects": [
             {"id": "solid", "kind": "mesh", "resource": mesh["name"], "solid": True, "transform": {"position": [-1200.0, 1500.0, 20.0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]}},
             {"id": "plain", "kind": "mesh", "resource": mesh["name"], "transform": {"position": [-1198.0, 1500.0, 20.0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]}},
+            {"id": "far", "kind": "mesh", "resource": mesh["name"], "streaming": {"primary": 120, "secondary": 96}, "transform": {"position": [-1196.0, 1500.0, 20.0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]}},
+            {"id": "far_solid", "kind": "mesh", "resource": mesh["name"], "solid": True, "streaming": {"primary": 150}, "transform": {"position": [-1194.0, 1500.0, 20.0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]}},
         ]}
         solid = step("sector.build (solid: true)", lambda: b.call("sector.build", project=project, scene=solid_scene))
         assert any("no collision data" in w for w in solid["warnings"]) == (not mi["hasCollision"]), (mi["hasCollision"], solid["warnings"])
         solid_nodes = json.loads(b.call("cr2w.fileToJson", file=solid["sector"])["json"])["Data"]["RootChunk"]["nodes"]
-        assert [n["Data"]["$type"] for n in solid_nodes] == ["worldInstancedDestructibleMeshNode", "worldMeshNode"], solid_nodes
+        assert [n["Data"]["$type"] for n in solid_nodes] == ["worldInstancedDestructibleMeshNode", "worldMeshNode", "worldMeshNode", "worldInstancedDestructibleMeshNode"], solid_nodes
         node = solid_nodes[0]["Data"]
         assert node["simulationType"] == "Kinematic" and node["isDestructible"] == 0 and node["turnDynamicOnImpulse"] == 0, node
         assert node["mesh"]["DepotPath"]["$value"] == mesh["name"] and len(node["instanceTransforms"]) == 1, node
+        # A scene's streaming distance is also a mesh's hide distance; without one the game decides (issue #16).
+        hides = [n["Data"]["forceAutoHideDistance"] for n in solid_nodes]
+        assert hides == [0, 0, 120, 150], hides
+        print("   forceAutoHideDistance:", hides)
         print("   solid:", mesh["name"].split("\\")[-1], "has collision:", mi["hasCollision"], "warnings:", solid["warnings"])
         # Validation refuses a bad scene and writes nothing.
         try:
