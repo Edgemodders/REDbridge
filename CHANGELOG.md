@@ -12,6 +12,24 @@ How to keep it:
 
 ## Unreleased
 
+## 0.13.0 (2026-11-15)
+
+### New
+
+- **`project.export` for animation** (part of issue #14, https://github.com/Edgemodders/REDbridge/issues/14, for REDcode's animation viewer, step A2). Three new `options`, checked on game 2.5:
+  - `rig` (or `rigs`, a list) for a `.mesh`: the mesh skinned on that rig's skeleton, the whole skeleton in the GLB. A game path or a `.rig` file on disk or under `archiveDir`. Several rigs are joined into one skeleton. A body needs its deformations rig (a garment likely too, unverified), `base\characters\base_entities\man_base\deformations_rigs\man_base_deformations.rig` (or `woman_base`), which has the animation bones (`Root`, `Hips`, `Spine`, ...) and the muscle bones. Add `man_base.rig` in `rigs` for the six bones only it has (`LeftEye`, `RightEye`, `WeaponLeft`, `WeaponRight`, `Trajectory`, `reference_joint`). A mesh with bones the rig lacks is refused with their names, where WolvenKit wrote a GLB that failed to save.
+  - `appearance` for a `.ent`: one `<name>.ent.glb` with the entity in that appearance (its name, the `.app` appearance's name, or `"default"` for the first). Every rig the entity's animated components name (a character's body, deformations and face rigs) is joined into one skeleton. Skinned meshes of the entity, its appearance and the appearance's parts are on it, with a morph target's base mesh unmorphed. Rigid meshes (a vehicle's body, doors, engine and steering wheel, a character's weapon) hang under the bone their slot names, so they follow it. The answer's `entity` lists the appearance, the rigs, the joint count, each mesh with what it is on (`skin`, `bone <name>`, another component, or `root`), and what was left out with why: the appearance's far proxy, which would cover the real meshes, components switched off in the appearance, and files not in the archives. A Trauma Team paramedic comes out as 22 meshes on 512 joints, an Archer Hella as 21 parts on 51.
+  - `rootMotion: true` for an `.anims`: the root motion on the `Root` node's translation and rotation channels, which WolvenKit's default export leaves out, so a clip moves through the scene. The clip's `extras.rootMotionType` then names the encoding (`TransformSplineSparseFrames`, `TransformLinearSparseFrames`, ...); without it, it says `Unknown`.
+
+  ```json
+  { "method": "project.export", "params": { "file": "<project>/source/archive/ep1/characters/entities/corpo/corpo__ep1_traumateam_ma.ent", "archiveDir": "<project>/source/archive", "rawDir": "<project>/source/raw", "options": { "appearance": "corpo__traumateam_ma_paramedic__lvl1_01", "meshMaterials": false } } }
+  ```
+
+### Other
+
+- Not in this release from issue #14: `.anims` import, `anims.info` and rig import, for EDGEfab later. Not done in an entity export: a skinned component's chunk mask (submeshes it hides; rigid ones keep theirs) and each component's mesh appearance; the materials are the mesh's own. A vehicle's shadow-only mesh (`body_shadow`) is kept, since nothing in the component marks it.
+- WolvenKit 10.0.0-beta.1's multi-mesh export fails without materials (it saves an empty material list). With `meshMaterials: false`, REDbridge runs the same steps itself.
+
 ## 0.12.1 (2026-11-08)
 
 ### Changed
