@@ -331,6 +331,54 @@ def main():
     except RuntimeError as e:
         print("   unknown preset refused:", str(e).splitlines()[0][:90], "...")
 
+    # project.export for animation (issue #14, REDcode's A2): a mesh on its rig, an entity in one appearance, root motion.
+    anim_project = os.path.join(out, "anim-project")
+    shutil.rmtree(anim_project, ignore_errors=True)
+    raw, arc = os.path.join(anim_project, "source", "raw"), os.path.join(anim_project, "source", "archive")
+    body = r"base\characters\common\base_bodies\man_average\t0_000_ma_base__full.mesh"
+    deform = r"base\characters\base_entities\man_base\deformations_rigs\man_base_deformations.rig"
+    man_rig = r"base\characters\base_entities\man_base\man_base.rig"
+    clip = r"base\animations\quest\main_quests\prologue\q001\q001_00c_rescuing_girl\anim\synced\synced__q001_00c__male_average.anims"
+    npc = r"ep1\characters\entities\corpo\corpo__ep1_traumateam_ma.ent"
+    for p in (body, clip, npc):
+        os.makedirs(os.path.dirname(os.path.join(arc, p)), exist_ok=True)
+        b.call("archive.extract", path=p, outFile=os.path.join(arc, p))
+
+    def glb_json(rel):
+        with open(os.path.join(raw, rel), "rb") as f:
+            data = f.read()
+        return json.loads(data[20:20 + struct.unpack_from("<I", data, 12)[0]])
+
+    def joints_of(j):
+        return {j["nodes"][i]["name"] for i in j["skins"][0]["joints"]}
+
+    try:
+        b.call("project.export", file=os.path.join(arc, body), archiveDir=arc, rawDir=raw, options={"rig": man_rig, "meshMaterials": False})
+        raise AssertionError("a body on man_base.rig alone was accepted")
+    except RuntimeError as e:
+        assert "bones the rig lacks" in str(e), e
+        print("   body on man_base.rig refused:", str(e)[:90], "...")
+    r = step("project.export mesh rigs=[man_base, deformations]", lambda: b.call("project.export", file=os.path.join(arc, body), archiveDir=arc, rawDir=raw, options={"rigs": [man_rig, deform], "meshMaterials": False}))
+    body_joints = joints_of(glb_json(next(w for w in r["written"] if w.endswith(".glb"))))
+    assert {"Root", "Hips", "Spine", "LeftEye", "WeaponRight", "l_SHL_0_JNT"} <= body_joints, sorted(body_joints)[:20]
+    r = step("project.export anims rootMotion=true", lambda: b.call("project.export", file=os.path.join(arc, clip), archiveDir=arc, rawDir=raw, options={"rootMotion": True}))
+    j = glb_json(next(w for w in r["written"] if w.endswith(".glb")))
+    land = next(a for a in j["animations"] if a["name"] == "synced__q001_00c_trauma_arrives_soldiers__land_v1__soldier_01")
+    root = next(c for c in land["channels"] if j["nodes"][c["target"]["node"]]["name"] == "Root" and c["target"]["path"] == "translation")
+    acc = j["accessors"][land["samplers"][root["sampler"]]["output"]]
+    assert acc["count"] > 100 and acc["min"][2] < -10, acc
+    clip_bones = {j["nodes"][c["target"]["node"]]["name"] for a in j["animations"] for c in a["channels"]}
+    r = step("project.export ent appearance=paramedic", lambda: b.call("project.export", file=os.path.join(arc, npc), archiveDir=arc, rawDir=raw, options={"appearance": "corpo__traumateam_ma_paramedic__lvl1_01", "meshMaterials": False}))
+    e = r["entity"]
+    assert len(e["meshes"]) >= 20 and any(m["why"].startswith("the appearance's far proxy") for m in e["leftOut"]), e
+    ent_joints = joints_of(glb_json(next(w for w in r["written"] if w.endswith(".ent.glb"))))
+    assert clip_bones <= ent_joints, sorted(clip_bones - ent_joints)
+    try:
+        b.call("project.export", file=os.path.join(arc, npc), archiveDir=arc, rawDir=raw, options={"appearance": "no_such_look"})
+        raise AssertionError("an unknown appearance was accepted")
+    except RuntimeError as e:
+        print("   unknown appearance refused:", str(e)[:90], "...")
+
     b.close()
     print(f"done in {time.time() - t:.1f}s, outputs in {out}")
 
