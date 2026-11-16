@@ -12,6 +12,16 @@ How to keep it:
 
 ## Unreleased
 
+### New
+
+- **`anims.info`** (issues #14 and #17, https://github.com/Edgemodders/REDbridge/issues/14, https://github.com/Edgemodders/REDbridge/issues/17, for EDGEdir's animation index): the clips of animation sets without decoding any, each with its name, `duration`, `frames`, `fps`, `type` (`Normal` or additive), `rootMotion` (the motion extraction's type, or null), `buffer` (`compressed` or `simd`) and `joints`, with the set's `rig`. Give `files` (game paths or hashes), or none for every `.anims` in the game a page at a time (`offset`, `limit` up to 1,000). A file that does not read answers its `error`, and the rest still answer. On game 2.5: 14,028 sets, about 16 ms a set, so the whole game in about 4 minutes.
+
+  ```json
+  { "method": "anims.info", "params": { "files": ["base\\animations\\quest_custom\\q001\\q001_00c_rescuing_girl\\q001_00c_trauma_arrives\\q001_00c_trauma_arrives_male_average.anims"] } }
+  ```
+- **`options.animations` for `project.export`** of an `.anims` (#17): only the named clips go into the glTF, the same glTF as before otherwise. A name the set lacks is refused with the name and the set's clip count. Only the chosen clips are decoded (the file is still read whole): one clip of `generic_male_average__stand__2h_on_sides__01.anims` exports in 1 s as 150 KB, the whole set in 7 s as 42 MB.
+- **`extension` for `archive.list`** (#17): only files with that ending, any case, with or without the dot (`".anims"`). `total` and the pages count only those: the game's 14,028 `.anims` in three pages of 5,000, the first in about 3 s.
+
 ## 0.13.0 (2026-11-15)
 
 ### New

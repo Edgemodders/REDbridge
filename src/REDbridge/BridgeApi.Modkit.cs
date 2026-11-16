@@ -38,7 +38,9 @@ public sealed partial class BridgeApi
         // A .ent exported as one GLB in this appearance ("default" for its first): bridge 0.13.0, #14.
         string? Appearance = null,
         // An .anims exported with its root motion on the root bone (WolvenKit leaves it off): bridge 0.13.0, #14.
-        bool? RootMotion = null);
+        bool? RootMotion = null,
+        // Only these clips of an .anims go into the glTF, by name; a name the set lacks is an error: bridge 0.14.0, #17.
+        IReadOnlyList<string>? Animations = null);
 
     /// <summary>Mesh is set when an import wrote a .mesh (bridge 0.9.0); Texture when an image import wrote a .xbm, as read back from it.</summary>
     public sealed record ModkitResult(bool Ok, List<string> Written, MeshImport? Mesh = null, TextureSetup? Texture = null, EntityExport? Entity = null);
@@ -148,6 +150,36 @@ public sealed partial class BridgeApi
 
         var before = Snapshot(rawDir);
         bool ok;
+        if (o.Animations is { } wanted)
+        {
+            if (!ext.Equals("anims", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException($"animations is for .anims files; {source.Name} is a .{ext}");
+            }
+            var animsFile = ReadProjectCr2w(source);
+            if (animsFile.RootChunk is not animAnimSet set)
+            {
+                throw new InvalidDataException($"{source.Name} is not an animation set");
+            }
+            // The clips' buffers stay in the set's data chunks, which each clip finds by its own index,
+            // so dropping the other entries leaves the chosen ones' data where the exporter reads it.
+            var names = wanted.ToHashSet(StringComparer.Ordinal);
+            var keep = set.Animations.Where(e => e?.Chunk?.Animation?.Chunk?.Name.GetResolvedText() is { } n && names.Contains(n)).ToList();
+            var found = keep.Select(e => e.Chunk!.Animation.Chunk!.Name.GetResolvedText()!).ToHashSet(StringComparer.Ordinal);
+            var lacking = wanted.Where(n => !found.Contains(n)).Distinct().ToList();
+            if (lacking.Count > 0)
+            {
+                throw new ArgumentException($"{source.Name} has no clip {string.Join(", ", lacking.Select(n => $"'{n}'"))} (it has {set.Animations.Count} clips; anims.info lists them)");
+            }
+            set.Animations.Clear();
+            foreach (var e in keep)
+            {
+                set.Animations.Add(e);
+            }
+            var anim = args.Get<AnimationExportArgs>();
+            ok = Modkit.ExportAnim(animsFile, OutFile(source, archive, rawDir), anim.IsBinary, anim.AdditiveRelativeToLocalTransform, anim.incRootMotion);
+            return new ModkitResult(ok, Changed(rawDir, before));
+        }
         var rigPaths = (o.Rigs ?? []).Concat(o.Rig is { } one ? [one] : []).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (rigPaths.Count > 0)
         {

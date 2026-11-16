@@ -60,11 +60,12 @@ public sealed partial class BridgeApi
 
     /// <summary>
     /// Pages through the files of one archive, or of every game archive, optionally filtered by a
-    /// name prefix. <paramref name="archive"/> is a name or an absolute path; names repeat across
+    /// name prefix and by an ending (<paramref name="extension"/>, such as ".anims", any case; bridge
+    /// 0.14.0, #17). <paramref name="archive"/> is a name or an absolute path; names repeat across
     /// the base game and Phantom Liberty, so the path is the unambiguous form.
     /// </summary>
     [JsonRpcMethod("archive.list")]
-    public FileList List(string? archive = null, string? prefix = null, int offset = 0, int limit = 500)
+    public FileList List(string? archive = null, string? prefix = null, int offset = 0, int limit = 500, string? extension = null)
     {
         RequireGame();
         limit = Math.Clamp(limit, 1, 5000);
@@ -74,6 +75,11 @@ public sealed partial class BridgeApi
         if (!string.IsNullOrEmpty(prefix))
         {
             query = query.Where(x => x.file.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        }
+        if (!string.IsNullOrEmpty(extension))
+        {
+            var dot = extension.StartsWith('.') ? extension : "." + extension;
+            query = query.Where(x => x.file.Name.EndsWith(dot, StringComparison.OrdinalIgnoreCase));
         }
         var all = query.OrderBy(x => x.file.Name, StringComparer.Ordinal).ToList();
         var page = all.Skip(offset).Take(limit).Select(x => ToDto(x.file, x.archive)).ToList();
