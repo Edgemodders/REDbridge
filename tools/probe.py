@@ -379,6 +379,25 @@ def main():
     except RuntimeError as e:
         print("   unknown appearance refused:", str(e)[:90], "...")
 
+    # 0.14.0 (#17): only chosen clips, anims.info, and archive.list by ending
+    land_name = "synced__q001_00c_trauma_arrives_soldiers__land_v1__soldier_01"
+    r = step("project.export anims animations=[one]", lambda: b.call("project.export", file=os.path.join(arc, clip), archiveDir=arc, rawDir=raw, options={"rootMotion": True, "animations": [land_name]}))
+    assert [a["name"] for a in glb_json(next(w for w in r["written"] if w.endswith(".glb")))["animations"]] == [land_name]
+    try:
+        b.call("project.export", file=os.path.join(arc, clip), archiveDir=arc, rawDir=raw, options={"animations": ["no_such_clip"]})
+        raise AssertionError("an unknown clip was accepted")
+    except RuntimeError as e:
+        assert "no_such_clip" in str(e), e
+        print("   unknown clip refused:", str(e)[:90], "...")
+    info = step("anims.info", lambda: b.call("anims.info", files=[clip, r"base\nothing.anims"])["items"])
+    one = next(c for c in info[0]["clips"] if c["name"] == land_name)
+    assert info[0]["rig"] and one["frames"] > 1 and one["duration"] > 0 and one["buffer"] in ("simd", "compressed"), one
+    assert info[1]["error"] and not info[1]["clips"], info[1]
+    page = step("anims.info whole game, first page", lambda: b.call("anims.info", limit=20))
+    assert page["total"] > 10000 and len(page["items"]) == 20, page["total"]
+    listed = step("archive.list extension=.anims", lambda: b.call("archive.list", extension=".anims", limit=5)["total"])
+    assert listed == page["total"], (listed, page["total"])
+
     b.close()
     print(f"done in {time.time() - t:.1f}s, outputs in {out}")
 

@@ -15,6 +15,7 @@ REDbridge is the .NET process that hosts WolvenKit's headless libraries and expo
 - **Next:** `project.pack` (build the `.archive` from a project; top priority), C3's `cr2w.getChunk` and `cr2w.patch`, then a `--serve` daemon mode on a named pipe rather than any tray UI (decided 2026-10-11).
 - **Linux, a future task the owner wants (2026-11-06), not scheduled:** a spike ran REDbridge 0.12.0 on Linux; most of it works with no code changes, and textures are the blocker. Plan, results and open question: [docs/linux.md](docs/linux.md).
 - Two machines push here: `git fetch` and `git rebase origin/main` before every push, after committing.
+- **0.14.0, released on 2026-11-16** (asked for by the owner from the REDnode session, for EDGEdir; the probe, with new checks, and REDcode's smoke test passed on its build): #17 for EDGEdir, with the `anims.info` part of #14: `anims.info` (`BridgeApi.Anims.cs`: per file or every `.anims` paged, no clip decoded, about 16 ms a set), `options.animations` for an `.anims` export (filters the set's `Animations` list before WolvenKit's `ExportAnim`; the data chunks stay, each clip finds its own), `extension` on `archive.list`. #14 stays open for EDGEfab (`.anims` import, rig import).
 
 ## Releases
 

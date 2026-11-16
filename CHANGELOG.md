@@ -12,6 +12,8 @@ How to keep it:
 
 ## Unreleased
 
+## 0.14.0 (2026-11-16)
+
 ### New
 
 - **`anims.info`** (issues #14 and #17, https://github.com/Edgemodders/REDbridge/issues/14, https://github.com/Edgemodders/REDbridge/issues/17, for EDGEdir's animation index): the clips of animation sets without decoding any, each with its name, `duration`, `frames`, `fps`, `type` (`Normal` or additive), `rootMotion` (the motion extraction's type, or null), `buffer` (`compressed` or `simd`) and `joints`, with the set's `rig`. Give `files` (game paths or hashes), or none for every `.anims` in the game a page at a time (`offset`, `limit` up to 1,000). A file that does not read answers its `error`, and the rest still answer. On game 2.5: 14,028 sets, about 16 ms a set, so the whole game in about 4 minutes.
