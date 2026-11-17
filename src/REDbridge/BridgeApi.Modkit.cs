@@ -43,7 +43,7 @@ public sealed partial class BridgeApi
         IReadOnlyList<string>? Animations = null);
 
     /// <summary>Mesh is set when an import wrote a .mesh (bridge 0.9.0); Texture when an image import wrote a .xbm, as read back from it.</summary>
-    public sealed record ModkitResult(bool Ok, List<string> Written, MeshImport? Mesh = null, TextureSetup? Texture = null, EntityExport? Entity = null);
+    public sealed record ModkitResult(bool Ok, List<string> Written, MeshImport? Mesh = null, TextureSetup? Texture = null, EntityExport? Entity = null, AnimsImport? Anims = null);
 
     /// <summary>
     /// What an entity export put in its GLB (bridge 0.13.0, #14): the appearance, the rigs joined into
@@ -571,7 +571,7 @@ public sealed partial class BridgeApi
     /// </para>
     /// </summary>
     [JsonRpcMethod("project.import")]
-    public async Task<ModkitResult> Import(string file, string rawDir, string archiveDir, bool keep = true, string? template = null, JsonElement? texture = null)
+    public async Task<ModkitResult> Import(string file, string rawDir, string archiveDir, bool keep = true, string? template = null, JsonElement? texture = null, string? rig = null)
     {
         var source = new FileInfo(file);
         if (!source.Exists)
@@ -595,6 +595,20 @@ public sealed partial class BridgeApi
         args.Get<GltfImportArgs>().Keep = keep;
 
         var relative = Path.GetRelativePath(raw.FullName, source.FullName);
+
+        // An animation set's glTF (<name>.anims.glb) imports as an .anims, not a mesh (bridge 0.15.0, #14).
+        if (IsAnimsGlb(source.Name))
+        {
+            if (texture is { ValueKind: not (JsonValueKind.Null or JsonValueKind.Undefined) })
+            {
+                throw new ArgumentException("texture applies to an image import, not to an .anims");
+            }
+            return ImportAnimsGlb(source, relative, archiveDir, keep, template, rig);
+        }
+        if (rig is not null)
+        {
+            throw new ArgumentException("rig applies to an .anims import (a <name>.anims.glb), for a new set");
+        }
 
         // A GLB becomes a .mesh only over an existing one: WolvenKit's importer says "Direct mesh importing
         // is not implemented". For a new asset, the template (a game path or a .mesh on disk) is copied to

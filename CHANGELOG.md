@@ -12,6 +12,19 @@ How to keep it:
 
 ## Unreleased
 
+### New
+
+- **`.anims` import from glTF** (issue #14, https://github.com/Edgemodders/REDbridge/issues/14, for EDGEfab's F7b-1): `project.import` of a `<name>.anims.glb` (or `.gltf`) writes `<name>.anims` through WolvenKit's ImportAnims, where it used to refuse it as a mesh with no mesh to import over.
+  - Where the set comes from: with `keep` (the default), the set already at the target is imported over, and its clips the GLB lacks stay. For a new set, pass `template` (an `.anims` to start from, a game path or a file) or the new `rig` (a game rig: an empty set on it). `keep: false` starts again from the template or rig.
+  - The answer's `anims` gives the set as written (`clips`, as `anims.info` reads them, and `rig`), with `from`, `updated`, `added`, `kept`, `skipped` (each with why) and WolvenKit's `notes`.
+  - A GLB WolvenKit cannot take writes nothing, and the error says why: a joint the rig lacks, a morph (weights) channel, two clips with one name, root motion it cannot encode.
+  - Checked on game 2.5: a clip exported with `rootMotion: true` and imported back keeps its length, frame count and root motion. Its root moves 14.10 m both before and after. WolvenKit stores the root motion as `animLinearCompressedMotionExtraction` whatever the game's clip used. Whether the game plays an imported clip is unverified.
+  - Example:
+
+    ```json
+    { "method": "project.import", "params": { "file": "<project>/source/raw/mymod/jump.anims.glb", "rawDir": "<project>/source/raw", "archiveDir": "<project>/source/archive", "rig": "base\\characters\\base_entities\\man_base\\man_base.rig" } }
+    ```
+
 ## 0.14.0 (2026-11-16)
 
 ### New

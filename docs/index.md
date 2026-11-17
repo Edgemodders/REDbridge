@@ -1,4 +1,4 @@
-# RED<span class="y">bridge</span> docs
+﻿# RED<span class="y">bridge</span> docs
 
 REDbridge hosts WolvenKit's engine in a local process and exposes it over JSON-RPC to REDcode, EDGEdeck, REDnode, other Edgemodders tools and AI assistants. The latest release is [0.12.0](https://github.com/Edgemodders/REDbridge/releases/latest), for game 2.5 (0.10.0 for game 2.31).
 
@@ -30,5 +30,6 @@ The architecture is in the [REDcode design document](https://edgemodders.github.
 | For EDGEwave | Done (0.9.0): `sound.importWavs` overrides game sound effects in a project from `<hash>.wav` files |
 | Game 2.5 | Done (0.11.0, issue #10): built with WolvenKit 10.0.0-beta.1. All 3,041 quest streaming sectors of 2.5 read, with the right node index in `nodeData`, which has new field names (see the changelog). `sector.build` writes 2.5 sectors. Game 2.31 sectors no longer read right; other 2.31 files do. The probe and REDcode's smoke test pass on 2.5 and 2.31. Not yet tried in the game |
 | For EDGEquest | Done on the bridge side (0.11.0, issue #9): `loc.lines` looks spoken lines up by stringId (a scene line's `locstringId.ruid`) with their subtitle texts, file and row, `.wem` voice-over files and lengths; `loc.searchLines` finds them by words (an index of 104,895 en-us lines from 3,800 subtitle files, built on first use in about 1.3 s, then a few milliseconds a search); `loc.newLinesFile` gives a project an empty subtitle file named in its `.xl`. Checked by the probe and against `sq030_01_dam_meetup.scene` (63 of its ruids have text, 50 a voice and a length). Not yet tried in the game |
+| Animations (issue #14) | 0.13.0: `project.export` puts a mesh on its rig, an entity in one appearance, and an `.anims` with its root motion. 0.14.0: `anims.info`, and an export of chosen clips. Next release: `project.import` of a `<name>.anims.glb` writes the `.anims`, over the set at the target, or new from a `template` or a game `rig`. Rig import from glTF is still to do |
 
 Source code and issues: [github.com/Edgemodders/REDbridge](https://github.com/Edgemodders/REDbridge)

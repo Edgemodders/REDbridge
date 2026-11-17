@@ -398,6 +398,35 @@ def main():
     listed = step("archive.list extension=.anims", lambda: b.call("archive.list", extension=".anims", limit=5)["total"])
     assert listed == page["total"], (listed, page["total"])
 
+    # 0.15.0 (#14, EDGEfab): .anims import from glTF. The GLB above holds the one land clip, with root motion.
+    one_glb = os.path.join(raw, clip + ".glb")
+    original = next(c for c in info[0]["clips"] if c["name"] == land_name)
+    r = step("project.import .anims.glb over its set (keep)", lambda: b.call("project.import", file=one_glb, rawDir=raw, archiveDir=arc)["anims"])
+    assert r["from"] == "existing" and r["updated"] == [land_name] and not r["added"] and not r["skipped"], r
+    assert len(r["kept"]) == len(info[0]["clips"]) - 1 and len(r["clips"]) == len(info[0]["clips"]), (len(r["kept"]), len(r["clips"]))
+    back = next(c for c in r["clips"] if c["name"] == land_name)
+    print(f"   land clip: {original['duration']} s, {original['frames']} frames, {original['rootMotion']} -> {back['duration']} s, {back['frames']} frames, {back['rootMotion']}")
+    assert abs(back["duration"] - original["duration"]) < 0.05 and back["rootMotion"], back
+    new_glb = os.path.join(raw, "probe", "probe_land.anims.glb")
+    os.makedirs(os.path.dirname(new_glb), exist_ok=True)
+    shutil.copyfile(one_glb, new_glb)
+    try:
+        b.call("project.import", file=new_glb, rawDir=raw, archiveDir=arc)
+        raise AssertionError("a new .anims with no rig or template was accepted")
+    except RuntimeError as e:
+        assert "pass rig" in str(e), e
+        print("   new set with no rig refused:", str(e)[:90], "...")
+    r = step("project.import .anims.glb new on its rig", lambda: b.call("project.import", file=new_glb, rawDir=raw, archiveDir=arc, rig=info[0]["rig"])["anims"])
+    assert r["from"] == "rig" and r["added"] == [land_name] and len(r["clips"]) == 1 and r["rig"].lower() == info[0]["rig"].lower(), r
+    # Round trip: the new set exported again moves its root as the game's clip does.
+    r = step("project.export of the imported set", lambda: b.call("project.export", file=os.path.join(arc, "probe", "probe_land.anims"), archiveDir=arc, rawDir=raw, options={"rootMotion": True}))
+    j2 = glb_json(next(w for w in r["written"] if w.endswith(".glb")))
+    land2 = j2["animations"][0]
+    root2 = next(c for c in land2["channels"] if j2["nodes"][c["target"]["node"]]["name"] == "Root" and c["target"]["path"] == "translation")
+    acc2 = j2["accessors"][land2["samplers"][root2["sampler"]]["output"]]
+    print(f"   root moves to z {acc['min'][2]:.2f} in the game's clip, {acc2['min'][2]:.2f} after the round trip")
+    assert abs(acc2["min"][2] - acc["min"][2]) < 0.1, (acc["min"], acc2["min"])
+
     b.close()
     print(f"done in {time.time() - t:.1f}s, outputs in {out}")
 
