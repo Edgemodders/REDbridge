@@ -12,6 +12,8 @@ How to keep it:
 
 ## Unreleased
 
+## 0.15.0 (2026-11-18)
+
 ### New
 
 - **`.anims` import from glTF** (issue #14, https://github.com/Edgemodders/REDbridge/issues/14, for EDGEfab's F7b-1): `project.import` of a `<name>.anims.glb` (or `.gltf`) writes `<name>.anims` through WolvenKit's ImportAnims, where it used to refuse it as a mesh with no mesh to import over.
