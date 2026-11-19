@@ -12,6 +12,10 @@ How to keep it:
 
 ## Unreleased
 
+### New
+
+- `sector.build` takes `removals`: nodes of the game's own sectors to remove, each `{ sector, index, kind, hash }`, written as ArchiveXL node deletions (`streaming: sectors:` with `expectedNodes` and `nodeDeletions`) into the scene's `.archive.xl`. Each is checked against the sector first: the index in range, the node of that class, and with a hash, a node-data entry placing that node carrying it. One that fails is not written and comes back in `refused` with why; what was written is in `removed`. A scene with removals and no objects writes only the `.xl`, and removes the sector and block of an earlier bake. For EDGEbuilder's doors (issue #18: https://github.com/Edgemodders/REDbridge/issues/18). Whether ArchiveXL removes a door cleanly in game is unverified: EDGEbuilder's D0 probe answers it.
+
 ## 0.15.0 (2026-11-18)
 
 ### New

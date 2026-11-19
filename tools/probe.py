@@ -267,6 +267,48 @@ def main():
     except RuntimeError as e:
         print("   not a sector:", str(e)[:90])
 
+    # sector.build removals (issue #18, for EDGEbuilder's doors): ArchiveXL node deletions in the .xl, checked against the sector.
+    rm_project = os.path.join(out, "removal-project")
+    shutil.rmtree(rm_project, ignore_errors=True)
+    os.makedirs(rm_project)
+    with_hash = next((i for i in items if i["hash"]), None)
+    assert with_hash, "no node with a global id in the busiest sector"
+    plain = next(i for i in items if i["node"] != with_hash["node"])
+    sec = busiest["path"]
+    wrong_kind = "worldEntityNode" if with_hash["kind"] != "worldEntityNode" else "worldStaticMeshNode"
+    asked = [
+        {"sector": sec, "index": with_hash["node"], "kind": with_hash["kind"], "hash": with_hash["hash"]},
+        {"sector": sec.replace("\\", "/"), "index": plain["node"], "kind": plain["kind"].removeprefix("world")},
+        {"sector": sec, "index": plain["node"], "kind": plain["kind"]},
+        {"sector": sec, "index": with_hash["node"], "kind": wrong_kind},
+        {"sector": sec, "index": with_hash["node"], "kind": with_hash["kind"], "hash": "0x1"},
+        {"sector": sec, "index": nodes["nodes"], "kind": with_hash["kind"]},
+        {"sector": "base\\worlds\\nope.streamingsector", "index": 0, "kind": "worldEntityNode"},
+    ]
+    only_rm = step("sector.build (removals only)", lambda: b.call("sector.build", project=rm_project, scene={"format": 1, "name": "Probe Removals", "objects": []}, removals=asked))
+    assert only_rm["sector"] is None and only_rm["block"] is None and only_rm["xl"] and only_rm["nodes"] == 0, only_rm
+    removed_at = sorted(r["index"] for r in only_rm["removed"])
+    assert removed_at == sorted({with_hash["node"], plain["node"]}), only_rm["removed"]
+    whys = [r["why"] for r in only_rm["refused"]]
+    assert len(whys) == 4, whys
+    assert any("not a " + wrong_kind in w for w in whys), whys
+    assert any("does not have the id 1:" in w for w in whys), whys
+    assert any(f"has {nodes['nodes']} nodes" in w for w in whys), whys
+    assert any(r["sector"].endswith("nope.streamingsector") for r in only_rm["refused"]), whys
+    assert any("twice" in w for w in only_rm["warnings"]), only_rm["warnings"]
+    xl = open(only_rm["xl"], encoding="utf-8").read()
+    first = min(with_hash["node"], plain["node"])
+    assert "blocks:" not in xl and f"  sectors:\n    - path: {sec}\n      expectedNodes: {nodes['nodes']}\n      nodeDeletions:\n        - index: {first}\n" in xl, xl
+    print(f"   removed {removed_at}, refused {len(whys)}:", [w[:60] for w in whys])
+    none_left = step("sector.build (every removal refused)", lambda: b.call("sector.build", project=rm_project, scene={"format": 1, "name": "Probe Removals", "objects": []}, removals=asked[3:]))
+    assert none_left["xl"] is None and not os.path.exists(only_rm["xl"]) and any("Nothing written" in w for w in none_left["warnings"]), none_left
+    if mesh and ent:
+        both = step("sector.build (objects and a removal)", lambda: b.call("sector.build", project=rm_project, scene=scene, removals=asked[:1]))
+        both_xl = open(both["xl"], encoding="utf-8").read()
+        assert both["sector"] and both["nodes"] == 3 and len(both["removed"]) == 1 and "  blocks:\n" in both_xl and "  sectors:\n" in both_xl, both_xl
+        gone = step("sector.build (the same scene, objects gone)", lambda: b.call("sector.build", project=rm_project, scene={**scene, "objects": []}, removals=asked[:1]))
+        assert gone["sector"] is None and not os.path.exists(both["sector"]) and any("earlier bake" in w for w in gone["warnings"]), gone
+
     # loc.searchLines, loc.lines and loc.newLinesFile (issue #9, for EDGEquest): spoken lines with their voice-over and length.
     found = step("loc.searchLines 'choom' (builds the index)", lambda: (lambda r: (r["total"], r["items"][0]))(b.call("loc.searchLines", query="choom", language="en-us", limit=50)))
     assert found[0] > 0, found

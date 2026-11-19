@@ -72,7 +72,32 @@ public sealed partial class BridgeApi
         public float? Secondary { get; set; }
     }
 
-    public sealed record SectorBuildResult(string Name, string Sector, string Block, string Xl, string SectorPath, string BlockPath, int Nodes, Bounds StreamingBox, IReadOnlyList<string> Warnings);
+    /// <summary>
+    /// A node of the game's own sectors to remove (issue #18). <see cref="Index"/> is the node's
+    /// index in the sector's <c>nodes</c> (what sector.nodes calls <c>node</c>), <see cref="Kind"/>
+    /// its class (with or without the <c>world</c> prefix), <see cref="Hash"/> its global node id
+    /// when it has one, decimal or <c>0x</c> hex, a string or a number.
+    /// </summary>
+    public sealed class SectorRemoval
+    {
+        public string Sector { get; set; } = "";
+        public int? Index { get; set; }
+        public string Kind { get; set; } = "";
+        public JsonElement? Hash { get; set; }
+    }
+
+    public sealed record RemovedNode(string Sector, int Index, string Kind);
+
+    public sealed record RefusedRemoval(string Sector, int? Index, string Why);
+
+    /// <summary>
+    /// <see cref="Sector"/>, <see cref="Block"/>, their paths and <see cref="StreamingBox"/> are null
+    /// when the scene has no objects (a bake of removals only); <see cref="Xl"/> is null when nothing
+    /// was written at all.
+    /// </summary>
+    public sealed record SectorBuildResult(string Name, string? Sector, string? Block, string? Xl, string? SectorPath, string? BlockPath, int Nodes, Bounds? StreamingBox, IReadOnlyList<string> Warnings, IReadOnlyList<RemovedNode> Removed, IReadOnlyList<RefusedRemoval> Refused);
+
+    private sealed record SectorDeletions(string Path, int ExpectedNodes, IReadOnlyList<(int Index, string Type)> Nodes);
 
     private static readonly JsonSerializerOptions SceneJson = new()
     {
@@ -107,8 +132,17 @@ public sealed partial class BridgeApi
     /// it when the scene gives the object's bounds: the game then needs the mod that has it.
     /// Nothing is written when validation fails.
     /// </summary>
+    /// <para>
+    /// <paramref name="removals"/> (issue #18) removes nodes of the game's own sectors through
+    /// ArchiveXL's node deletions, written into the same .xl under <c>streaming: sectors:</c>. Each is
+    /// checked against its sector first: the index must be in range, the node of that class, and with
+    /// a hash, a node-data entry placing that node must carry it. One that fails is not written and
+    /// comes back in <c>refused</c> with why; the rest of the bake goes on. <c>expectedNodes</c> is the
+    /// sector's own node count, so ArchiveXL skips the deletions if another version of the sector is
+    /// loaded. A scene with removals and no objects writes only the .xl.
+    /// </para>
     [JsonRpcMethod("sector.build")]
-    public SectorBuildResult BuildSector(string project, string? name = null, string? sceneFile = null, JsonElement? scene = null, float? margin = null, string? archive = null, string? root = null)
+    public SectorBuildResult BuildSector(string project, string? name = null, string? sceneFile = null, JsonElement? scene = null, float? margin = null, string? archive = null, string? root = null, JsonElement? removals = null)
     {
         using var mods = ModFiles.Open(_host, archive, root);
         var sceneText = sceneFile is not null ? File.ReadAllText(sceneFile) : scene?.GetRawText() ?? throw new ArgumentException("sceneFile or scene is required");
@@ -126,13 +160,20 @@ public sealed partial class BridgeApi
 
         var errors = new List<string>();
         var warnings = new List<string>();
+        var asked = new List<SectorRemoval>();
+        if (removals is { ValueKind: not JsonValueKind.Null and not JsonValueKind.Undefined } r)
+        {
+            asked = r.ValueKind == JsonValueKind.Array
+                ? JsonSerializer.Deserialize<List<SectorRemoval>>(r.GetRawText(), SceneJson) ?? []
+                : throw new ArgumentException("removals must be a list of { sector, index, kind, hash }");
+        }
         if (model.Format != 1)
         {
             errors.Add($"Scene format {model.Format} is not supported; this bridge writes format 1");
         }
-        if (model.Objects.Count == 0)
+        if (model.Objects.Count == 0 && asked.Count == 0)
         {
-            errors.Add("The scene has no objects");
+            errors.Add("The scene has no objects and no removals");
         }
         var refs = new HashSet<string>(StringComparer.Ordinal);
         var gameLoaded = _host.GameDir is not null;
@@ -196,118 +237,153 @@ public sealed partial class BridgeApi
             throw new InvalidDataException($"The scene did not validate:\n  {string.Join("\n  ", errors)}");
         }
 
-        // Bounds per object: given, read from the game, or a unit box.
+        // Node removals in the game's own sectors (issue #18), checked before anything is written.
+        var (deletions, removed, refused) = CheckRemovals(asked, mods, warnings);
+
         var relFolder = Path.Combine("edgebuilder", safeName);
         var sectorPath = Path.Combine(relFolder, safeName + ".streamingsector");
         var blockPath = Path.Combine(relFolder, safeName + ".streamingblock");
-
-        var sector = new worldStreamingSector
+        var archiveDir = Path.Combine(projectDir, "source", "archive");
+        string? sectorFile = null, blockFile = null;
+        Bounds? streamingBox = null;
+        if (model.Objects.Count > 0)
         {
-            CookingPlatform = Enums.ECookingPlatform.PLATFORM_PC,
-            Version = SectorVersion,
-            Level = 0,
-            Category = Enums.worldStreamingSectorCategory.Exterior,
-        };
-        var nodeData = new worldNodeDataBuffer();
-        float[] boxMin = [float.MaxValue, float.MaxValue, float.MaxValue];
-        float[] boxMax = [float.MinValue, float.MinValue, float.MinValue];
-        var largestRange = 0f;
-
-        for (var i = 0; i < model.Objects.Count; i++)
-        {
-            var o = model.Objects[i];
-            var local = o.Bounds ?? ((gameLoaded || !mods.IsEmpty) && o.Kind != "light" ? TryReadBounds(o.Resource!, mods, warnings) : null) ?? new Bounds([-0.5f, -0.5f, 0f], [0.5f, 0.5f, 1f]);
-            var world = o.Kind == "light" ? PointBounds(o.Transform.Position) : WorldBounds(local, o.Transform);
-            var size = Math.Max(Math.Max(world.Max[0] - world.Min[0], world.Max[1] - world.Min[1]), world.Max[2] - world.Min[2]);
-            var primary = o.Streaming?.Primary ?? Math.Clamp(size * 11f, 40f, 400f);
-            var secondary = o.Streaming?.Secondary ?? primary * 0.8f;
-            largestRange = Math.Max(largestRange, Math.Max(primary, secondary));
-
-            sector.Nodes.Add(new CHandle<worldNode>(NodeFor(o)));
-            var setup = NodeSetup[o.Kind];
-            var position = new Vector3 { X = o.Transform.Position[0], Y = o.Transform.Position[1], Z = o.Transform.Position[2] };
-            // Base-game mesh nodes stream from the middle of their bounds; entities and lights from their position.
-            var refPoint = o.Kind == "mesh"
-                ? new Vector3 { X = (world.Min[0] + world.Max[0]) / 2, Y = (world.Min[1] + world.Max[1]) / 2, Z = (world.Min[2] + world.Max[2]) / 2 }
-                : position;
-            nodeData.Add(new worldCompiledNodeInstanceSetupInfo
+            // Bounds per object: given, read from the game, or a unit box.
+            var sector = new worldStreamingSector
             {
-                Transform = new Transform
+                CookingPlatform = Enums.ECookingPlatform.PLATFORM_PC,
+                Version = SectorVersion,
+                Level = 0,
+                Category = Enums.worldStreamingSectorCategory.Exterior,
+            };
+            var nodeData = new worldNodeDataBuffer();
+            float[] boxMin = [float.MaxValue, float.MaxValue, float.MaxValue];
+            float[] boxMax = [float.MinValue, float.MinValue, float.MinValue];
+            var largestRange = 0f;
+
+            for (var i = 0; i < model.Objects.Count; i++)
+            {
+                var o = model.Objects[i];
+                var local = o.Bounds ?? ((gameLoaded || !mods.IsEmpty) && o.Kind != "light" ? TryReadBounds(o.Resource!, mods, warnings) : null) ?? new Bounds([-0.5f, -0.5f, 0f], [0.5f, 0.5f, 1f]);
+                var world = o.Kind == "light" ? PointBounds(o.Transform.Position) : WorldBounds(local, o.Transform);
+                var size = Math.Max(Math.Max(world.Max[0] - world.Min[0], world.Max[1] - world.Min[1]), world.Max[2] - world.Min[2]);
+                var primary = o.Streaming?.Primary ?? Math.Clamp(size * 11f, 40f, 400f);
+                var secondary = o.Streaming?.Secondary ?? primary * 0.8f;
+                largestRange = Math.Max(largestRange, Math.Max(primary, secondary));
+
+                sector.Nodes.Add(new CHandle<worldNode>(NodeFor(o)));
+                var setup = NodeSetup[o.Kind];
+                var position = new Vector3 { X = o.Transform.Position[0], Y = o.Transform.Position[1], Z = o.Transform.Position[2] };
+                // Base-game mesh nodes stream from the middle of their bounds; entities and lights from their position.
+                var refPoint = o.Kind == "mesh"
+                    ? new Vector3 { X = (world.Min[0] + world.Max[0]) / 2, Y = (world.Min[1] + world.Max[1]) / 2, Z = (world.Min[2] + world.Max[2]) / 2 }
+                    : position;
+                nodeData.Add(new worldCompiledNodeInstanceSetupInfo
                 {
-                    Position = new Vector4 { X = position.X, Y = position.Y, Z = position.Z, W = 0 },
-                    Orientation = new Quaternion { I = o.Transform.Rotation[0], J = o.Transform.Rotation[1], K = o.Transform.Rotation[2], R = o.Transform.Rotation[3] },
-                },
-                Scale = new Vector3 { X = o.Transform.Scale[0], Y = o.Transform.Scale[1], Z = o.Transform.Scale[2] },
-                SecondaryRefPointPosition = new Vector3 { X = refPoint.X, Y = refPoint.Y, Z = refPoint.Z },
-                StreamingRefPoint = new Vector3 { X = refPoint.X, Y = refPoint.Y, Z = refPoint.Z },
-                PreboostStreamingRefPoint = new Vector3 { X = position.X, Y = position.Y, Z = position.Z },
-                PatchedNode = 0,
-                GlobalNodeId = new worldGlobalNodeID { Hash = (ulong)(NodeRef)o.Ref! },
-                ProxyMeshId = new worldGlobalNodeID { Hash = 0 },
-                ExternalInplaceResourceHash = new CResourceReference<worldCookedPrefabData>(0UL),
-                NodeIdx = (ulong)i,
-                NodeFlags = setup.Flags,
-                StreamingPriority = setup.Priority,
-                TodvisMask = 0,
-                SecondaryRefPointDistance = o.Streaming?.Secondary is null && o.Streaming?.Primary is null ? secondary : (o.Streaming.Secondary ?? float.MaxValue),
-                StreamingDistance = primary,
-                InstanceIndex = uint.MaxValue,
-                DataGroup = Enums.worldStreamingDataGroup.Base,
-            });
-            for (var k = 0; k < 3; k++)
+                    Transform = new Transform
+                    {
+                        Position = new Vector4 { X = position.X, Y = position.Y, Z = position.Z, W = 0 },
+                        Orientation = new Quaternion { I = o.Transform.Rotation[0], J = o.Transform.Rotation[1], K = o.Transform.Rotation[2], R = o.Transform.Rotation[3] },
+                    },
+                    Scale = new Vector3 { X = o.Transform.Scale[0], Y = o.Transform.Scale[1], Z = o.Transform.Scale[2] },
+                    SecondaryRefPointPosition = new Vector3 { X = refPoint.X, Y = refPoint.Y, Z = refPoint.Z },
+                    StreamingRefPoint = new Vector3 { X = refPoint.X, Y = refPoint.Y, Z = refPoint.Z },
+                    PreboostStreamingRefPoint = new Vector3 { X = position.X, Y = position.Y, Z = position.Z },
+                    PatchedNode = 0,
+                    GlobalNodeId = new worldGlobalNodeID { Hash = (ulong)(NodeRef)o.Ref! },
+                    ProxyMeshId = new worldGlobalNodeID { Hash = 0 },
+                    ExternalInplaceResourceHash = new CResourceReference<worldCookedPrefabData>(0UL),
+                    NodeIdx = (ulong)i,
+                    NodeFlags = setup.Flags,
+                    StreamingPriority = setup.Priority,
+                    TodvisMask = 0,
+                    SecondaryRefPointDistance = o.Streaming?.Secondary is null && o.Streaming?.Primary is null ? secondary : (o.Streaming.Secondary ?? float.MaxValue),
+                    StreamingDistance = primary,
+                    InstanceIndex = uint.MaxValue,
+                    DataGroup = Enums.worldStreamingDataGroup.Base,
+                });
+                for (var k = 0; k < 3; k++)
+                {
+                    boxMin[k] = Math.Min(boxMin[k], world.Min[k]);
+                    boxMax[k] = Math.Max(boxMax[k], world.Max[k]);
+                }
+            }
+
+            var buffer = RedBuffer.CreateBuffer(NodeDataBufferFlags, []);
+            buffer.Data = nodeData;
+            buffer.Parent = sector;
+            buffer.ParentTypes.Add("worldStreamingSector.transforms");
+            sector.NodeData = new DataBuffer { Buffer = buffer };
+            sector.VariantIndices.Add(0);
+            sector.PersisentNodeIndex = 0;
+
+            var pad = margin ?? Math.Max(100f, largestRange);
+            streamingBox = new Bounds(
+                [boxMin[0] - pad, boxMin[1] - pad, boxMin[2] - pad],
+                [boxMax[0] + pad, boxMax[1] + pad, boxMax[2] + pad]);
+            var block = new worldStreamingBlock { CookingPlatform = Enums.ECookingPlatform.PLATFORM_PC };
+            block.Descriptors.Add(new worldStreamingSectorDescriptor
             {
-                boxMin[k] = Math.Min(boxMin[k], world.Min[k]);
-                boxMax[k] = Math.Max(boxMax[k], world.Max[k]);
+                Data = new CResourceAsyncReference<worldStreamingSector>(sectorPath, InternalEnums.EImportFlags.Soft),
+                StreamingBox = new Box
+                {
+                    Min = new Vector4 { X = streamingBox.Min[0], Y = streamingBox.Min[1], Z = streamingBox.Min[2], W = 1 },
+                    Max = new Vector4 { X = streamingBox.Max[0], Y = streamingBox.Max[1], Z = streamingBox.Max[2], W = 1 },
+                },
+                Level = 0,
+                Category = Enums.worldStreamingSectorCategory.Exterior,
+                NumNodeRanges = 1,
+                BlockIndex = new worldStreamingBlockIndex { Oup = Enums.worldStreamingDataGroup.Base },
+            });
+            block.Index = new worldStreamingBlockIndex { Oup = Enums.worldStreamingDataGroup.Base };
+
+            sectorFile = WriteCr2w(Path.Combine(archiveDir, sectorPath), sector);
+            blockFile = WriteCr2w(Path.Combine(archiveDir, blockPath), block);
+        }
+        else
+        {
+            // A bake of removals only: an earlier bake's sector and block would be packed for nothing.
+            foreach (var stale in new[] { sectorPath, blockPath })
+            {
+                var file = Path.Combine(archiveDir, stale);
+                if (File.Exists(file))
+                {
+                    File.Delete(file);
+                    warnings.Add($"Removed {stale}, written by an earlier bake: the scene has no objects now");
+                }
             }
         }
 
-        var buffer = RedBuffer.CreateBuffer(NodeDataBufferFlags, []);
-        buffer.Data = nodeData;
-        buffer.Parent = sector;
-        buffer.ParentTypes.Add("worldStreamingSector.transforms");
-        sector.NodeData = new DataBuffer { Buffer = buffer };
-        sector.VariantIndices.Add(0);
-        sector.PersisentNodeIndex = 0;
-
-        var pad = margin ?? Math.Max(100f, largestRange);
-        var streamingBox = new Bounds(
-            [boxMin[0] - pad, boxMin[1] - pad, boxMin[2] - pad],
-            [boxMax[0] + pad, boxMax[1] + pad, boxMax[2] + pad]);
-        var block = new worldStreamingBlock { CookingPlatform = Enums.ECookingPlatform.PLATFORM_PC };
-        block.Descriptors.Add(new worldStreamingSectorDescriptor
-        {
-            Data = new CResourceAsyncReference<worldStreamingSector>(sectorPath, InternalEnums.EImportFlags.Soft),
-            StreamingBox = new Box
-            {
-                Min = new Vector4 { X = streamingBox.Min[0], Y = streamingBox.Min[1], Z = streamingBox.Min[2], W = 1 },
-                Max = new Vector4 { X = streamingBox.Max[0], Y = streamingBox.Max[1], Z = streamingBox.Max[2], W = 1 },
-            },
-            Level = 0,
-            Category = Enums.worldStreamingSectorCategory.Exterior,
-            NumNodeRanges = 1,
-            BlockIndex = new worldStreamingBlockIndex { Oup = Enums.worldStreamingDataGroup.Base },
-        });
-        block.Index = new worldStreamingBlockIndex { Oup = Enums.worldStreamingDataGroup.Base };
-
-        var archiveDir = Path.Combine(projectDir, "source", "archive");
-        var sectorFile = WriteCr2w(Path.Combine(archiveDir, sectorPath), sector);
-        var blockFile = WriteCr2w(Path.Combine(archiveDir, blockPath), block);
         // Named <name>.archive.xl, so it sits beside <name>.archive when the project is packed
         // under that mod name: the pairing EDGEbuilder's bake probe loaded in game 2.5 (issue #13).
         var xlDir = Path.Combine(projectDir, "source", "resources", "archive", "pc", "mod");
         var xlFile = Path.Combine(xlDir, safeName + ".archive.xl");
-        Directory.CreateDirectory(xlDir);
-        File.WriteAllText(xlFile, XlFor(safeName, blockPath), new UTF8Encoding(false));
+        string? xlWritten = null;
+        if (model.Objects.Count > 0 || deletions.Count > 0)
+        {
+            Directory.CreateDirectory(xlDir);
+            File.WriteAllText(xlFile, XlFor(safeName, model.Objects.Count > 0 ? blockPath : null, deletions), new UTF8Encoding(false));
+            xlWritten = Path.GetFullPath(xlFile);
+        }
+        else
+        {
+            if (IsOurXl(xlFile))
+            {
+                File.Delete(xlFile);
+                warnings.Add($"Removed {safeName}.archive.xl, written by an earlier bake");
+            }
+            warnings.Add("Nothing written: the scene has no objects and every removal was refused");
+        }
         // Before 0.12.0 the file was <name>.xl with a resource patch; left beside the new one it
         // would add the block a second time, so it goes when it is ours.
         var oldXl = Path.Combine(xlDir, safeName + ".xl");
-        if (File.Exists(oldXl) && File.ReadLines(oldXl).FirstOrDefault()?.StartsWith("# Written by REDbridge sector.build") == true)
+        if (IsOurXl(oldXl))
         {
             File.Delete(oldXl);
             warnings.Add($"Removed {safeName}.xl, written by an earlier sector.build; {safeName}.archive.xl replaces it");
         }
-        _host.Log.Info($"sector.build {safeName}: {model.Objects.Count} nodes -> {sectorFile}");
-        return new SectorBuildResult(safeName, sectorFile, blockFile, xlFile, sectorPath, blockPath, model.Objects.Count, streamingBox, warnings);
+        _host.Log.Info($"sector.build {safeName}: {model.Objects.Count} nodes, {removed.Count} removals ({refused.Count} refused) -> {xlWritten ?? "nothing"}");
+        return new SectorBuildResult(safeName, sectorFile, blockFile, xlWritten, sectorFile is null ? null : sectorPath, blockFile is null ? null : blockPath, model.Objects.Count, streamingBox, warnings, removed, refused);
     }
 
     private worldNode NodeFor(SceneObject o)
@@ -498,13 +574,185 @@ public sealed partial class BridgeApi
         return Path.GetFullPath(file);
     }
 
-    private static string XlFor(string name, string blockPath) =>
-        $"""
-        # Written by REDbridge sector.build for the EDGEbuilder scene "{name}".
-        # ArchiveXL merges this streaming block into the world's, so the sector it names streams in.
-        streaming:
-          blocks:
-            - {blockPath}
+    private const string XlMark = "# Written by REDbridge sector.build";
 
-        """;
+    private static bool IsOurXl(string file) =>
+        File.Exists(file) && File.ReadLines(file).FirstOrDefault()?.StartsWith(XlMark, StringComparison.Ordinal) == true;
+
+    /// <summary>
+    /// The .xl: the scene's block under <c>streaming: blocks:</c>, and ArchiveXL's node deletions
+    /// per game sector under <c>streaming: sectors:</c> (issue #18).
+    /// </summary>
+    private static string XlFor(string name, string? blockPath, IReadOnlyList<SectorDeletions> sectors)
+    {
+        var sb = new StringBuilder();
+        sb.Append(XlMark).Append($" for the EDGEbuilder scene \"{name}\".\n");
+        if (blockPath is not null)
+        {
+            sb.Append("# ArchiveXL merges this streaming block into the world's, so the sector it names streams in.\n");
+        }
+        if (sectors.Count > 0)
+        {
+            sb.Append("# ArchiveXL removes the listed nodes from the game's sectors, only while each sector has expectedNodes nodes.\n");
+        }
+        sb.Append("streaming:\n");
+        if (blockPath is not null)
+        {
+            sb.Append("  blocks:\n");
+            sb.Append($"    - {blockPath}\n");
+        }
+        if (sectors.Count > 0)
+        {
+            sb.Append("  sectors:\n");
+            foreach (var s in sectors)
+            {
+                sb.Append($"    - path: {s.Path}\n");
+                sb.Append($"      expectedNodes: {s.ExpectedNodes.ToString(CultureInfo.InvariantCulture)}\n");
+                sb.Append("      nodeDeletions:\n");
+                foreach (var (index, type) in s.Nodes)
+                {
+                    sb.Append($"        - index: {index.ToString(CultureInfo.InvariantCulture)}\n");
+                    sb.Append($"          type: {type}\n");
+                }
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Checks each removal against its sector (read once per sector, from the mods first, then the
+    /// game): the index in range, the node of the class asked for, and the hash on a node-data entry
+    /// placing that node. Answers the deletions to write, grouped and sorted per sector, what was
+    /// removed and what was refused with why.
+    /// </summary>
+    private (List<SectorDeletions> Deletions, List<RemovedNode> Removed, List<RefusedRemoval> Refused) CheckRemovals(List<SectorRemoval> asked, ModFiles mods, List<string> warnings)
+    {
+        var deletions = new List<SectorDeletions>();
+        var removed = new List<RemovedNode>();
+        var refused = new List<RefusedRemoval>();
+        foreach (var bad in asked.Where(r => string.IsNullOrWhiteSpace(r.Sector)))
+        {
+            refused.Add(new RefusedRemoval(bad.Sector ?? "", bad.Index, "needs the sector's path"));
+        }
+        foreach (var group in asked.Where(r => !string.IsNullOrWhiteSpace(r.Sector)).GroupBy(r => r.Sector.Trim().Replace('/', '\\'), StringComparer.OrdinalIgnoreCase))
+        {
+            var path = group.Key;
+            worldStreamingSector? sector = null;
+            string? why = null;
+            try
+            {
+                var (found, cr2w) = ReadResource(path, mods);
+                path = found;
+                sector = cr2w.RootChunk as worldStreamingSector;
+                if (sector is null)
+                {
+                    why = $"'{found}' is a {TypeNameOf(cr2w.RootChunk)}, not a streaming sector";
+                }
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or InvalidDataException or InvalidOperationException)
+            {
+                why = ex.Message;
+            }
+
+            // The global node ids on the node-data entries that place each node.
+            Dictionary<int, HashSet<ulong>>? ids = null;
+            if (sector?.NodeData.Data is worldNodeDataBuffer data)
+            {
+                ids = [];
+                foreach (var e in data)
+                {
+                    var n = (int)(ulong)e.NodeIdx;
+                    if (!ids.TryGetValue(n, out var set))
+                    {
+                        ids[n] = set = [];
+                    }
+                    set.Add((ulong)e.GlobalNodeId.Hash);
+                }
+            }
+
+            var nodes = new List<(int Index, string Type)>();
+            foreach (var r in group)
+            {
+                if (why is not null)
+                {
+                    refused.Add(new RefusedRemoval(path, r.Index, why));
+                    continue;
+                }
+                if (r.Index is not int index)
+                {
+                    refused.Add(new RefusedRemoval(path, null, "needs the node's index"));
+                    continue;
+                }
+                var count = sector!.Nodes.Count;
+                if (index < 0 || index >= count)
+                {
+                    refused.Add(new RefusedRemoval(path, index, $"the sector has {count} nodes, so there is no node {index}"));
+                    continue;
+                }
+                if (string.IsNullOrWhiteSpace(r.Kind))
+                {
+                    refused.Add(new RefusedRemoval(path, index, "needs the node's kind, its class"));
+                    continue;
+                }
+                var kind = sector.Nodes[index].GetValue()?.GetType().Name ?? "nothing";
+                var want = r.Kind.StartsWith("world", StringComparison.Ordinal) ? r.Kind : "world" + char.ToUpperInvariant(r.Kind[0]) + r.Kind[1..];
+                if (!string.Equals(kind, want, StringComparison.OrdinalIgnoreCase))
+                {
+                    refused.Add(new RefusedRemoval(path, index, $"node {index} is a {kind}, not a {want}"));
+                    continue;
+                }
+                if (r.Hash is { ValueKind: not JsonValueKind.Null and not JsonValueKind.Undefined } hashJson)
+                {
+                    if (!TryNodeHash(hashJson, out var hash))
+                    {
+                        refused.Add(new RefusedRemoval(path, index, $"hash {hashJson.GetRawText()} is not a number (decimal, or hex with 0x)"));
+                        continue;
+                    }
+                    if (hash != 0)
+                    {
+                        if (ids is null)
+                        {
+                            refused.Add(new RefusedRemoval(path, index, "the sector's node data could not be read, so the hash could not be checked"));
+                            continue;
+                        }
+                        if (!ids.TryGetValue(index, out var carried) || !carried.Contains(hash))
+                        {
+                            var have = carried is null ? "no node-data entry places it" : $"its node-data entries carry {string.Join(", ", carried.Select(h => h.ToString(CultureInfo.InvariantCulture)))}";
+                            refused.Add(new RefusedRemoval(path, index, $"node {index} does not have the id {hash}: {have}"));
+                            continue;
+                        }
+                    }
+                }
+                if (nodes.Any(n => n.Index == index))
+                {
+                    warnings.Add($"{path}: node {index} is in removals twice; removed once");
+                    continue;
+                }
+                nodes.Add((index, kind));
+                removed.Add(new RemovedNode(path, index, kind));
+            }
+            if (nodes.Count > 0)
+            {
+                deletions.Add(new SectorDeletions(path, sector!.Nodes.Count, nodes.OrderBy(n => n.Index).ToList()));
+            }
+        }
+        return (deletions, removed, refused);
+    }
+
+    private static bool TryNodeHash(JsonElement json, out ulong hash)
+    {
+        hash = 0;
+        if (json.ValueKind == JsonValueKind.Number)
+        {
+            return json.TryGetUInt64(out hash);
+        }
+        if (json.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+        var text = json.GetString()!.Trim();
+        return text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? ulong.TryParse(text[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out hash)
+            : ulong.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out hash);
+    }
 }
