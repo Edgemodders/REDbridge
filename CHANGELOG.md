@@ -12,6 +12,8 @@ How to keep it:
 
 ## Unreleased
 
+## 0.17.0 (2026-11-20)
+
 ### New
 
 - `anims.sync({ path, clips })` reads the sync tracks of a synced animation set's clips: the extra joints past the rig's own (`syncTrajectory`, `syncTrajectory1`, ...), each a partner's Root as seen from this member's Root at the same moment, which WolvenKit's glTF export leaves out. Each track answers `translation` and `rotation` as `{ times, values }`: times in seconds, values in glTF axes as the GLB's own joints, constant keys as one key at time 0. `path` is a game path, a hash or an `.anims` file; without `clips`, every clip. A clip with no extra joints answers `tracks: []`; a SIMD clip with extra joints answers an `error` (not decoded yet). For REDcode's synced sets (issue #19: https://github.com/Edgemodders/REDbridge/issues/19).
