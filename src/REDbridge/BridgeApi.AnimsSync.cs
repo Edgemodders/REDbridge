@@ -26,8 +26,11 @@ public sealed partial class BridgeApi
     /// <summary>One extra joint of a clip, by its name in the buffer's extraDataNames.</summary>
     public sealed record SyncTrack(string Name, SyncKeys Translation, SyncKeys Rotation);
 
-    /// <summary>A clip and its extra joints. Error says why a clip's tracks could not be read.</summary>
-    public sealed record SyncClip(string Name, double Duration, uint Frames, IReadOnlyList<SyncTrack> Tracks, string? Error = null);
+    /// <summary>
+    /// A clip and its extra joints. Error says why a clip's tracks could not be read; Note says what a
+    /// clip's buffer does not hold (a SIMD clip may store no translation for its sync joints).
+    /// </summary>
+    public sealed record SyncClip(string Name, double Duration, uint Frames, IReadOnlyList<SyncTrack> Tracks, string? Error = null, string? Note = null);
 
     /// <summary>What anims.sync read: the set's path and the clips asked for.</summary>
     public sealed record AnimsSyncResult(string Path, IReadOnlyList<SyncClip> Clips);
@@ -74,10 +77,10 @@ public sealed partial class BridgeApi
             var wanted = clips.ToHashSet(StringComparer.Ordinal);
             anims = anims.Where(a => wanted.Contains(a.Name.GetResolvedText() ?? "")).ToList();
         }
-        return new AnimsSyncResult(name, anims.Select(SyncOf).ToList());
+        return new AnimsSyncResult(name, anims.Select(a => SyncOf(a, set)).ToList());
     }
 
-    private static SyncClip SyncOf(animAnimation anim)
+    private static SyncClip SyncOf(animAnimation anim, animAnimSet set)
     {
         var clip = anim.Name.GetResolvedText() ?? "";
         var duration = Math.Round((double)(float)anim.Duration, 4);
@@ -113,7 +116,7 @@ public sealed partial class BridgeApi
             case animAnimationBufferSimd s:
                 return (byte)s.NumExtraJoints == 0
                     ? new SyncClip(clip, duration, s.NumFrames, [])
-                    : new SyncClip(clip, duration, s.NumFrames, [], $"its buffer is SIMD, whose {(byte)s.NumExtraJoints} sync tracks are not decoded yet");
+                    : SimdSyncOf(anim, s, set);
             case null:
                 return new SyncClip(clip, duration, 0, [], "it has no buffer");
             case var other:
@@ -175,6 +178,8 @@ public sealed partial class BridgeApi
         {
             rig = _host.Parser.ReadRed4File(s) is { RootChunk: animRig } f ? f : throw new InvalidDataException($"{rigPath} is not a rig");
         }
+        // SIMD clips whose extra joints WolvenKit's decoder would misread (#20).
+        SimdForWolvenKit(set);
         var model = ModelRoot.CreateModel();
         if (!Modkit.GetAnimation(animsFile, rig, outfile.Name, ref model, true, a.AdditiveRelativeToLocalTransform, a.incRootMotion))
         {

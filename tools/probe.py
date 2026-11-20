@@ -5,7 +5,7 @@
 
 Standard library only. The bridge's stderr log is passed through.
 """
-import json
+import json, math
 import os
 import shutil
 import subprocess
@@ -533,6 +533,53 @@ def main():
     again = root_times(av_glb, av)
     assert len(again) == len(times) and max(abs(x - y) for x, y in zip(times, again)) < 0.01, (len(times), len(again))
     print(f"   round trip: {len(again)} Root keys at the same times")
+
+    # #20: a SIMD clip with extra joints (152 + 2: 156 columns stored, 152 read by WolvenKit's decoder).
+    player_set = clip.replace("synced__q001_00c__male_average.anims", "synced__q001_00c__player_male.anims")
+    sandra_set = clip.replace("synced__q001_00c__male_average.anims", "synced__q001_00c__female_average.anims")
+    fpp = "synced__q001_00c_injector__fpp"
+    os.makedirs(os.path.dirname(os.path.join(arc, player_set)), exist_ok=True)
+    b.call("archive.extract", path=player_set, outFile=os.path.join(arc, player_set))
+    r = step("project.export SIMD clip with sync joints", lambda: b.call("project.export", file=os.path.join(arc, player_set), archiveDir=arc, rawDir=raw, options={"animations": [fpp]}))
+    pj_rel = next(w for w in r["written"] if w.endswith(".glb"))
+    pj = glb_json(pj_rel)
+    with open(os.path.join(raw, pj_rel), "rb") as f:
+        pdata = f.read()
+    pbin = pdata[20 + struct.unpack_from("<I", pdata, 12)[0] + 8:]
+
+    def first_value(anim, node, path):
+        ch = next(c for c in anim["channels"] if pj["nodes"][c["target"]["node"]]["name"] == node and c["target"]["path"] == path)
+        acc = pj["accessors"][anim["samplers"][ch["sampler"]]["output"]]
+        bv = pj["bufferViews"][acc["bufferView"]]
+        n = {"VEC3": 3, "VEC4": 4}[acc["type"]]
+        return struct.unpack_from(f"<{2 * n}f", pbin, bv.get("byteOffset", 0) + acc.get("byteOffset", 0))
+
+    fa = pj["animations"][0]
+    spine_t = first_value(fa, "Spine", "translation")
+    spine_s = first_value(fa, "Spine", "scale")
+    hips_r = first_value(fa, "Hips", "rotation")
+    print(f"   Spine translation {[round(x, 3) for x in spine_t[:3]]}, scale {[round(x, 3) for x in spine_s[:3]]}, Hips rotation keys 0 and 1 {[round(x, 3) for x in hips_r]}")
+    assert abs(spine_t[0] - 0.103) < 0.01 and all(abs(x - 1) < 0.01 for x in spine_s[:3]), (spine_t, spine_s)
+    assert max(abs(a - c) for a, c in zip(hips_r[:4], hips_r[4:])) < 0.05, hips_r
+    sim = step("anims.sync SIMD clip", lambda: b.call("anims.sync", path=player_set, clips=[fpp])["clips"][0])
+    assert [t["name"] for t in sim["tracks"]] == ["syncTrajectory", "syncTrajectory1"] and all(len(t["rotation"]["times"]) == 515 for t in sim["tracks"]), sim.get("error")
+    assert sim.get("note") and "no translation" in sim["note"], sim
+    sandra = b.call("anims.sync", path=sandra_set, clips=["synced__q001_00c_injector__sandra"])["clips"][0]
+    mine, hers = sim["tracks"][1]["rotation"], sandra["tracks"][2]["rotation"]
+
+    def near(k, t):
+        i = min(range(len(k["times"])), key=lambda i: abs(k["times"][i] - t))
+        return k["values"][i]
+
+    def angle(qa, qb):
+        ax, ay, az, aw = qa
+        bx, by, bz, bw = qb
+        w = aw * bw - ax * bx - ay * by - az * bz
+        return 2 * math.degrees(math.acos(min(1, abs(w))))
+
+    worst = max(angle(near(mine, t), near(hers, t)) for t in (0.5, 3, 6, 9, 12, 15))
+    print(f"   the player's syncTrajectory1 against Sandra's syncTrajectory2: within {worst:.2f} deg of each other's inverse")
+    assert worst < 1, worst
 
     b.close()
     print(f"done in {time.time() - t:.1f}s, outputs in {out}")
