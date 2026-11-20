@@ -73,10 +73,12 @@ public sealed partial class BridgeApi
     }
 
     /// <summary>
-    /// A node of the game's own sectors to remove (issue #18). <see cref="Index"/> is the node's
-    /// index in the sector's <c>nodes</c> (what sector.nodes calls <c>node</c>), <see cref="Kind"/>
-    /// its class (with or without the <c>world</c> prefix), <see cref="Hash"/> its global node id
-    /// when it has one, decimal or <c>0x</c> hex, a string or a number.
+    /// A node-data entry of the game's own sectors to remove (issue #18). <see cref="Index"/> is the
+    /// entry's index in the sector's node data (what sector.nodes calls <c>index</c>, and REDnode's
+    /// registry the number after the colon), <see cref="Kind"/> the class of the node it places (with
+    /// or without the <c>world</c> prefix), <see cref="Hash"/> the entry's global node id when it has
+    /// one, decimal or <c>0x</c> hex, a string or a number. For an entity, its proxy meshes go too
+    /// unless <see cref="Proxies"/> is false.
     /// </summary>
     public sealed class SectorRemoval
     {
@@ -84,9 +86,17 @@ public sealed partial class BridgeApi
         public int? Index { get; set; }
         public string Kind { get; set; } = "";
         public JsonElement? Hash { get; set; }
+        public bool? Proxies { get; set; }
     }
 
-    public sealed record RemovedNode(string Sector, int Index, string Kind);
+    /// <summary>The entity entry a removed proxy mesh stands in for.</summary>
+    public sealed record ProxyOwner(string Sector, int Index);
+
+    /// <summary>
+    /// A removed entry: its sector, its index, the node it places and that node's class, its global
+    /// node id, and for a proxy mesh removed with its entity, <see cref="ProxyOf"/>.
+    /// </summary>
+    public sealed record RemovedNode(string Sector, int Index, int Node, string Kind, string? Id, ProxyOwner? ProxyOf);
 
     public sealed record RefusedRemoval(string Sector, int? Index, string Why);
 
@@ -134,12 +144,17 @@ public sealed partial class BridgeApi
     /// </summary>
     /// <para>
     /// <paramref name="removals"/> (issue #18) removes nodes of the game's own sectors through
-    /// ArchiveXL's node deletions, written into the same .xl under <c>streaming: sectors:</c>. Each is
-    /// checked against its sector first: the index must be in range, the node of that class, and with
-    /// a hash, a node-data entry placing that node must carry it. One that fails is not written and
-    /// comes back in <c>refused</c> with why; the rest of the bake goes on. <c>expectedNodes</c> is the
-    /// sector's own node count, so ArchiveXL skips the deletions if another version of the sector is
-    /// loaded. A scene with removals and no objects writes only the .xl.
+    /// ArchiveXL's node deletions, written into the same .xl under <c>streaming: sectors:</c>. ArchiveXL
+    /// deletes node-data entries, so each removal names an entry, and is checked against its sector
+    /// first: the entry in range, the node it places of that class, and with a hash, the entry's own
+    /// global node id. One that fails is not written and comes back in <c>refused</c> with why; the rest
+    /// of the bake goes on. <c>expectedNodes</c> is the sector's entry count, so ArchiveXL skips the
+    /// deletions if another version of the sector is loaded. An entity's proxy meshes (a
+    /// <c>worldEntityProxyMeshNode</c> whose <c>ownerGlobalId</c> is the entity's id, in a sector whose
+    /// streaming box holds the entity, quest sectors only for an entity in one; the game shows a proxy
+    /// while its entity is not there) are removed
+    /// with it, in <c>removed</c> with <c>proxyOf</c>. A scene with removals and no objects writes only
+    /// the .xl.
     /// </para>
     [JsonRpcMethod("sector.build")]
     public SectorBuildResult BuildSector(string project, string? name = null, string? sceneFile = null, JsonElement? scene = null, float? margin = null, string? archive = null, string? root = null, JsonElement? removals = null)
@@ -593,7 +608,7 @@ public sealed partial class BridgeApi
         }
         if (sectors.Count > 0)
         {
-            sb.Append("# ArchiveXL removes the listed nodes from the game's sectors, only while each sector has expectedNodes nodes.\n");
+            sb.Append("# ArchiveXL removes the listed node-data entries from the game's sectors, only while each sector has expectedNodes entries.\n");
         }
         sb.Append("streaming:\n");
         if (blockPath is not null)
@@ -619,123 +634,282 @@ public sealed partial class BridgeApi
         return sb.ToString();
     }
 
+    /// <summary>A sector read for removals: its node data as a list, or why it could not be read.</summary>
+    private sealed class RemovalSector
+    {
+        public string Path = "";
+        public worldStreamingSector? Sector;
+        public List<worldCompiledNodeInstanceSetupInfo>? Entries;
+        public string? Why;
+    }
+
+    /// <summary>
+    /// Proxy meshes per game sector: entry, the node it places, its owner's id and its own. Kept in
+    /// <c>%LOCALAPPDATA%\REDbridge\cache\sector-proxies.json</c> for the game's exe it was read from,
+    /// since the first search around a place reads a few hundred sectors (about 40 s).
+    /// </summary>
+    private readonly Dictionary<string, List<(int Entry, int Node, ulong Owner, ulong Id)>> _proxies = new(StringComparer.OrdinalIgnoreCase);
+    private string? _proxiesGame;
+    private bool _proxiesChanged;
+
+    private static string ProxiesFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "REDbridge", "cache", "sector-proxies.json");
+
+    private sealed record ProxyCache(string Game, Dictionary<string, ulong[][]> Sectors);
+
+    /// <summary>The game's exe size and time, so a game update starts the kept proxies afresh.</summary>
+    private string GameStamp()
+    {
+        var exe = new FileInfo(Path.Combine(_host.GameDir ?? "", "bin", "x64", "Cyberpunk2077.exe"));
+        return exe.Exists ? $"{exe.Length}-{exe.LastWriteTimeUtc.Ticks}" : _host.GameDir ?? "";
+    }
+
+    private void LoadProxies()
+    {
+        var stamp = GameStamp();
+        if (_proxiesGame == stamp)
+        {
+            return;
+        }
+        _proxies.Clear();
+        _proxiesGame = stamp;
+        _proxiesChanged = false;
+        try
+        {
+            if (File.Exists(ProxiesFile) && JsonSerializer.Deserialize<ProxyCache>(File.ReadAllText(ProxiesFile), SceneJson) is { } kept && kept.Game == stamp)
+            {
+                foreach (var (path, rows) in kept.Sectors)
+                {
+                    _proxies[path] = rows.Where(r => r.Length == 4).Select(r => ((int)r[0], (int)r[1], r[2], r[3])).ToList();
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            _host.Log.Warning($"sector.build: the kept proxy list could not be read, so it starts afresh: {ex.Message}");
+        }
+    }
+
+    private void SaveProxies()
+    {
+        if (!_proxiesChanged || _proxiesGame is null)
+        {
+            return;
+        }
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ProxiesFile)!);
+            var rows = _proxies.ToDictionary(kv => kv.Key, kv => kv.Value.Select(x => new[] { (ulong)x.Entry, (ulong)x.Node, x.Owner, x.Id }).ToArray());
+            var temp = ProxiesFile + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(new ProxyCache(_proxiesGame, rows)));
+            File.Move(temp, ProxiesFile, true);
+            _proxiesChanged = false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _host.Log.Warning($"sector.build: the proxy list could not be kept: {ex.Message}");
+        }
+    }
+
+    private RemovalSector ReadForRemoval(string path, ModFiles mods, Dictionary<string, RemovalSector> seen)
+    {
+        var key = path.Trim().Replace('/', '\\');
+        if (seen.TryGetValue(key, out var s))
+        {
+            return s;
+        }
+        s = new RemovalSector { Path = key };
+        try
+        {
+            var (found, cr2w) = ReadResource(key, mods);
+            s.Path = found;
+            if (cr2w.RootChunk is not worldStreamingSector sector)
+            {
+                s.Why = $"'{found}' is a {TypeNameOf(cr2w.RootChunk)}, not a streaming sector";
+            }
+            else if (sector.NodeData.Data is not worldNodeDataBuffer data)
+            {
+                s.Why = $"'{found}': its node data could not be read";
+            }
+            else
+            {
+                s.Sector = sector;
+                s.Entries = [.. data];
+            }
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or InvalidDataException or InvalidOperationException)
+        {
+            s.Why = ex.Message;
+        }
+        seen[key] = s;
+        seen[s.Path] = s;
+        return s;
+    }
+
+    private static string NodeKind(RemovalSector s, int node) =>
+        node >= 0 && node < s.Sector!.Nodes.Count ? s.Sector.Nodes[node].GetValue()?.GetType().Name ?? "nothing" : "nothing";
+
+    /// <summary>The proxy meshes a sector holds, read once per game and kept.</summary>
+    private List<(int Entry, int Node, ulong Owner, ulong Id)> ProxiesIn(string path, ModFiles mods, Dictionary<string, RemovalSector> seen)
+    {
+        LoadProxies();
+        if (mods.IsEmpty && _proxies.TryGetValue(path, out var kept))
+        {
+            return kept;
+        }
+        var list = new List<(int, int, ulong, ulong)>();
+        var s = ReadForRemoval(path, mods, seen);
+        if (s.Entries is not null)
+        {
+            for (var i = 0; i < s.Entries.Count; i++)
+            {
+                var e = s.Entries[i];
+                var node = (int)(ulong)e.NodeIdx;
+                if (node >= 0 && node < s.Sector!.Nodes.Count && s.Sector.Nodes[node].GetValue() is worldEntityProxyMeshNode proxy)
+                {
+                    list.Add((i, node, (ulong)proxy.OwnerGlobalId.Hash, (ulong)e.GlobalNodeId.Hash));
+                }
+            }
+        }
+        if (mods.IsEmpty && s.Entries is not null)
+        {
+            _proxies[path] = list;
+            _proxiesChanged = true;
+        }
+        return list;
+    }
+
     /// <summary>
     /// Checks each removal against its sector (read once per sector, from the mods first, then the
-    /// game): the index in range, the node of the class asked for, and the hash on a node-data entry
-    /// placing that node. Answers the deletions to write, grouped and sorted per sector, what was
-    /// removed and what was refused with why.
+    /// game): the entry in range, the node it places of the class asked for, and the entry's global
+    /// node id when a hash is given. Then finds each removed entity's proxy meshes. Answers the
+    /// deletions to write, grouped and sorted per sector, what was removed and what was refused with why.
     /// </summary>
     private (List<SectorDeletions> Deletions, List<RemovedNode> Removed, List<RefusedRemoval> Refused) CheckRemovals(List<SectorRemoval> asked, ModFiles mods, List<string> warnings)
     {
-        var deletions = new List<SectorDeletions>();
         var removed = new List<RemovedNode>();
         var refused = new List<RefusedRemoval>();
-        foreach (var bad in asked.Where(r => string.IsNullOrWhiteSpace(r.Sector)))
+        var seen = new Dictionary<string, RemovalSector>(StringComparer.OrdinalIgnoreCase);
+        var picked = new Dictionary<string, SortedDictionary<int, string>>(StringComparer.OrdinalIgnoreCase);
+        var owners = new List<(string Sector, int Index, ulong Id, float[] At, bool Quest)>();
+
+        bool Pick(string sector, int entry, string type)
         {
-            refused.Add(new RefusedRemoval(bad.Sector ?? "", bad.Index, "needs the sector's path"));
+            if (!picked.TryGetValue(sector, out var set))
+            {
+                picked[sector] = set = [];
+            }
+            return set.TryAdd(entry, type);
         }
-        foreach (var group in asked.Where(r => !string.IsNullOrWhiteSpace(r.Sector)).GroupBy(r => r.Sector.Trim().Replace('/', '\\'), StringComparer.OrdinalIgnoreCase))
+
+        foreach (var r in asked)
         {
-            var path = group.Key;
-            worldStreamingSector? sector = null;
-            string? why = null;
-            try
+            if (string.IsNullOrWhiteSpace(r.Sector))
             {
-                var (found, cr2w) = ReadResource(path, mods);
-                path = found;
-                sector = cr2w.RootChunk as worldStreamingSector;
-                if (sector is null)
+                refused.Add(new RefusedRemoval(r.Sector ?? "", r.Index, "needs the sector's path"));
+                continue;
+            }
+            var s = ReadForRemoval(r.Sector, mods, seen);
+            if (s.Why is not null)
+            {
+                refused.Add(new RefusedRemoval(s.Path, r.Index, s.Why));
+                continue;
+            }
+            if (r.Index is not int index)
+            {
+                refused.Add(new RefusedRemoval(s.Path, null, "needs the node-data entry's index (sector.nodes' index)"));
+                continue;
+            }
+            var count = s.Entries!.Count;
+            if (index < 0 || index >= count)
+            {
+                refused.Add(new RefusedRemoval(s.Path, index, $"the sector has {count} node-data entries, so there is no entry {index}"));
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(r.Kind))
+            {
+                refused.Add(new RefusedRemoval(s.Path, index, "needs the kind, the class of the node the entry places"));
+                continue;
+            }
+            var e = s.Entries[index];
+            var node = (int)(ulong)e.NodeIdx;
+            var kind = NodeKind(s, node);
+            var want = r.Kind.StartsWith("world", StringComparison.Ordinal) ? r.Kind : "world" + char.ToUpperInvariant(r.Kind[0]) + r.Kind[1..];
+            if (!string.Equals(kind, want, StringComparison.OrdinalIgnoreCase))
+            {
+                refused.Add(new RefusedRemoval(s.Path, index, $"entry {index} places node {node}, a {kind}, not a {want}"));
+                continue;
+            }
+            var id = (ulong)e.GlobalNodeId.Hash;
+            if (r.Hash is { ValueKind: not JsonValueKind.Null and not JsonValueKind.Undefined } hashJson)
+            {
+                if (!TryNodeHash(hashJson, out var hash))
                 {
-                    why = $"'{found}' is a {TypeNameOf(cr2w.RootChunk)}, not a streaming sector";
+                    refused.Add(new RefusedRemoval(s.Path, index, $"hash {hashJson.GetRawText()} is not a number (decimal, or hex with 0x)"));
+                    continue;
+                }
+                if (hash != 0 && hash != id)
+                {
+                    var have = id == 0 ? "it has no id" : $"its id is {id.ToString(CultureInfo.InvariantCulture)}";
+                    refused.Add(new RefusedRemoval(s.Path, index, $"entry {index} does not have the id {hash}: {have}"));
+                    continue;
                 }
             }
-            catch (Exception ex) when (ex is FileNotFoundException or InvalidDataException or InvalidOperationException)
+            if (!Pick(s.Path, index, kind))
             {
-                why = ex.Message;
+                warnings.Add($"{s.Path}: entry {index} is in removals twice; removed once");
+                continue;
             }
-
-            // The global node ids on the node-data entries that place each node.
-            Dictionary<int, HashSet<ulong>>? ids = null;
-            if (sector?.NodeData.Data is worldNodeDataBuffer data)
+            removed.Add(new RemovedNode(s.Path, index, node, kind, id == 0 ? null : id.ToString(CultureInfo.InvariantCulture), null));
+            if (kind == nameof(worldEntityNode) && r.Proxies != false && id != 0)
             {
-                ids = [];
-                foreach (var e in data)
-                {
-                    var n = (int)(ulong)e.NodeIdx;
-                    if (!ids.TryGetValue(n, out var set))
-                    {
-                        ids[n] = set = [];
-                    }
-                    set.Add((ulong)e.GlobalNodeId.Hash);
-                }
-            }
-
-            var nodes = new List<(int Index, string Type)>();
-            foreach (var r in group)
-            {
-                if (why is not null)
-                {
-                    refused.Add(new RefusedRemoval(path, r.Index, why));
-                    continue;
-                }
-                if (r.Index is not int index)
-                {
-                    refused.Add(new RefusedRemoval(path, null, "needs the node's index"));
-                    continue;
-                }
-                var count = sector!.Nodes.Count;
-                if (index < 0 || index >= count)
-                {
-                    refused.Add(new RefusedRemoval(path, index, $"the sector has {count} nodes, so there is no node {index}"));
-                    continue;
-                }
-                if (string.IsNullOrWhiteSpace(r.Kind))
-                {
-                    refused.Add(new RefusedRemoval(path, index, "needs the node's kind, its class"));
-                    continue;
-                }
-                var kind = sector.Nodes[index].GetValue()?.GetType().Name ?? "nothing";
-                var want = r.Kind.StartsWith("world", StringComparison.Ordinal) ? r.Kind : "world" + char.ToUpperInvariant(r.Kind[0]) + r.Kind[1..];
-                if (!string.Equals(kind, want, StringComparison.OrdinalIgnoreCase))
-                {
-                    refused.Add(new RefusedRemoval(path, index, $"node {index} is a {kind}, not a {want}"));
-                    continue;
-                }
-                if (r.Hash is { ValueKind: not JsonValueKind.Null and not JsonValueKind.Undefined } hashJson)
-                {
-                    if (!TryNodeHash(hashJson, out var hash))
-                    {
-                        refused.Add(new RefusedRemoval(path, index, $"hash {hashJson.GetRawText()} is not a number (decimal, or hex with 0x)"));
-                        continue;
-                    }
-                    if (hash != 0)
-                    {
-                        if (ids is null)
-                        {
-                            refused.Add(new RefusedRemoval(path, index, "the sector's node data could not be read, so the hash could not be checked"));
-                            continue;
-                        }
-                        if (!ids.TryGetValue(index, out var carried) || !carried.Contains(hash))
-                        {
-                            var have = carried is null ? "no node-data entry places it" : $"its node-data entries carry {string.Join(", ", carried.Select(h => h.ToString(CultureInfo.InvariantCulture)))}";
-                            refused.Add(new RefusedRemoval(path, index, $"node {index} does not have the id {hash}: {have}"));
-                            continue;
-                        }
-                    }
-                }
-                if (nodes.Any(n => n.Index == index))
-                {
-                    warnings.Add($"{path}: node {index} is in removals twice; removed once");
-                    continue;
-                }
-                nodes.Add((index, kind));
-                removed.Add(new RemovedNode(path, index, kind));
-            }
-            if (nodes.Count > 0)
-            {
-                deletions.Add(new SectorDeletions(path, sector!.Nodes.Count, nodes.OrderBy(n => n.Index).ToList()));
+                var p = e.Transform.Position;
+                owners.Add((s.Path, index, id, [p.X, p.Y, p.Z], s.Sector!.Category == Enums.worldStreamingSectorCategory.Quest));
             }
         }
+
+        // An entity's proxy meshes, in the sectors whose streaming box holds the entity. Quest sectors'
+        // boxes cover the whole world (2,789 of 3,112 sectors around V's flat door), so they are
+        // searched only for an entity in a quest sector.
+        if (owners.Count > 0)
+        {
+            if (_host.GameDir is null)
+            {
+                warnings.Add("The game is not loaded, so the removed entities' proxy meshes were not looked for: they may still show");
+            }
+            else
+            {
+                var started = DateTime.Now;
+                var sectors = AllSectors();
+                var looked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var o in owners)
+                {
+                    var at = new Bounds(o.At, o.At);
+                    foreach (var cand in sectors.Where(x => Meets(x.Box, at) && (o.Quest || x.Kind != "quest")))
+                    {
+                        looked.Add(cand.Path);
+                        foreach (var px in ProxiesIn(cand.Path, mods, seen))
+                        {
+                            if (px.Owner != o.Id)
+                            {
+                                continue;
+                            }
+                            var ps = ReadForRemoval(cand.Path, mods, seen);
+                            if (Pick(ps.Path, px.Entry, nameof(worldEntityProxyMeshNode)))
+                            {
+                                removed.Add(new RemovedNode(ps.Path, px.Entry, px.Node, nameof(worldEntityProxyMeshNode), px.Id == 0 ? null : px.Id.ToString(CultureInfo.InvariantCulture), new ProxyOwner(o.Sector, o.Index)));
+                            }
+                        }
+                    }
+                }
+                SaveProxies();
+                _host.Log.Info($"sector.build: looked for proxies of {owners.Count} entities in {looked.Count} sectors in {(DateTime.Now - started).TotalSeconds:F1} s");
+            }
+        }
+
+        var deletions = picked
+            .Where(kv => kv.Value.Count > 0)
+            .Select(kv => new SectorDeletions(kv.Key, seen[kv.Key].Entries!.Count, kv.Value.Select(x => (x.Key, x.Value)).ToList()))
+            .ToList();
         return (deletions, removed, refused);
     }
 

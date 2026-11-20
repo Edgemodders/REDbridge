@@ -271,35 +271,56 @@ def main():
     rm_project = os.path.join(out, "removal-project")
     shutil.rmtree(rm_project, ignore_errors=True)
     os.makedirs(rm_project)
-    with_hash = next((i for i in items if i["hash"]), None)
+    # ArchiveXL deletes node-data entries: a removal names sector.nodes' index, and expectedNodes is the entry count.
+    with_hash = next((i for i in items if i["hash"] and i["kind"] != "worldEntityNode"), None)
     assert with_hash, "no node with a global id in the busiest sector"
-    plain = next(i for i in items if i["node"] != with_hash["node"])
+    plain = next(i for i in items if i["index"] != with_hash["index"])
     sec = busiest["path"]
+    entries = nodes["total"]
     wrong_kind = "worldEntityNode" if with_hash["kind"] != "worldEntityNode" else "worldStaticMeshNode"
     asked = [
-        {"sector": sec, "index": with_hash["node"], "kind": with_hash["kind"], "hash": with_hash["hash"]},
-        {"sector": sec.replace("\\", "/"), "index": plain["node"], "kind": plain["kind"].removeprefix("world")},
-        {"sector": sec, "index": plain["node"], "kind": plain["kind"]},
-        {"sector": sec, "index": with_hash["node"], "kind": wrong_kind},
-        {"sector": sec, "index": with_hash["node"], "kind": with_hash["kind"], "hash": "0x1"},
-        {"sector": sec, "index": nodes["nodes"], "kind": with_hash["kind"]},
+        {"sector": sec, "index": with_hash["index"], "kind": with_hash["kind"], "hash": with_hash["hash"]},
+        {"sector": sec.replace("\\", "/"), "index": plain["index"], "kind": plain["kind"].removeprefix("world")},
+        {"sector": sec, "index": plain["index"], "kind": plain["kind"]},
+        {"sector": sec, "index": with_hash["index"], "kind": wrong_kind},
+        {"sector": sec, "index": with_hash["index"], "kind": with_hash["kind"], "hash": "0x1"},
+        {"sector": sec, "index": entries, "kind": with_hash["kind"]},
         {"sector": "base\\worlds\\nope.streamingsector", "index": 0, "kind": "worldEntityNode"},
     ]
     only_rm = step("sector.build (removals only)", lambda: b.call("sector.build", project=rm_project, scene={"format": 1, "name": "Probe Removals", "objects": []}, removals=asked))
     assert only_rm["sector"] is None and only_rm["block"] is None and only_rm["xl"] and only_rm["nodes"] == 0, only_rm
     removed_at = sorted(r["index"] for r in only_rm["removed"])
-    assert removed_at == sorted({with_hash["node"], plain["node"]}), only_rm["removed"]
+    assert removed_at == sorted({with_hash["index"], plain["index"]}), only_rm["removed"]
+    assert all(r["proxyOf"] is None for r in only_rm["removed"]), only_rm["removed"]
+    assert {r["node"] for r in only_rm["removed"]} == {with_hash["node"], plain["node"]}, only_rm["removed"]
     whys = [r["why"] for r in only_rm["refused"]]
     assert len(whys) == 4, whys
     assert any("not a " + wrong_kind in w for w in whys), whys
     assert any("does not have the id 1:" in w for w in whys), whys
-    assert any(f"has {nodes['nodes']} nodes" in w for w in whys), whys
+    assert any(f"has {entries} node-data entries" in w for w in whys), whys
     assert any(r["sector"].endswith("nope.streamingsector") for r in only_rm["refused"]), whys
     assert any("twice" in w for w in only_rm["warnings"]), only_rm["warnings"]
     xl = open(only_rm["xl"], encoding="utf-8").read()
-    first = min(with_hash["node"], plain["node"])
-    assert "blocks:" not in xl and f"  sectors:\n    - path: {sec}\n      expectedNodes: {nodes['nodes']}\n      nodeDeletions:\n        - index: {first}\n" in xl, xl
-    print(f"   removed {removed_at}, refused {len(whys)}:", [w[:60] for w in whys])
+    first = min(with_hash["index"], plain["index"])
+    assert "blocks:" not in xl and f"  sectors:\n    - path: {sec}\n      expectedNodes: {entries}\n      nodeDeletions:\n        - index: {first}\n" in xl, xl
+    print(f"   removed entries {removed_at}, refused {len(whys)}:", [w[:60] for w in whys])
+
+    # An entity's proxy mesh goes with it (EDGEbuilder's D0: V's flat door, entry 288, its proxy in exterior_-11_9_0_1, entry 254).
+    door_sec = "base\\worlds\\03_night_city\\_compiled\\default\\exterior_-22_19_1_0.streamingsector"
+    door = b.call("sector.nodes", path=door_sec)
+    door_entry = next(i for i in door["items"] if i["index"] == 288)
+    assert door_entry["kind"] == "worldEntityNode" and door_entry["hash"], door_entry
+    with_proxy = step("sector.build (V's door, with its proxy)", lambda: b.call("sector.build", project=rm_project, scene={"format": 1, "name": "Probe Door", "objects": []}, removals=[{"sector": door_sec, "index": 288, "kind": "entityNode", "hash": door_entry["hash"]}]))
+    proxies = [r for r in with_proxy["removed"] if r["proxyOf"]]
+    assert any(r["sector"].endswith("exterior_-11_9_0_1.streamingsector") and r["index"] == 254 and r["kind"] == "worldEntityProxyMeshNode" for r in proxies), with_proxy["removed"]
+    assert all(r["proxyOf"]["index"] == 288 for r in proxies), proxies
+    door_xl = open(with_proxy["xl"], encoding="utf-8").read()
+    assert f"expectedNodes: {door['total']}\n" in door_xl and "        - index: 254\n          type: worldEntityProxyMeshNode\n" in door_xl, door_xl
+    print(f"   {door['total']} entries; proxies:", [(r["sector"].split(chr(92))[-1], r["index"]) for r in proxies])
+    again = step("sector.build (V's door again, proxies kept)", lambda: b.call("sector.build", project=rm_project, scene={"format": 1, "name": "Probe Door", "objects": []}, removals=[{"sector": door_sec, "index": 288, "kind": "entityNode"}]))
+    assert len(again["removed"]) == len(with_proxy["removed"]), again["removed"]
+    no_proxy = b.call("sector.build", project=rm_project, scene={"format": 1, "name": "Probe Door", "objects": []}, removals=[{"sector": door_sec, "index": 288, "kind": "entityNode", "proxies": False}])
+    assert len(no_proxy["removed"]) == 1 and "worldEntityProxyMeshNode" not in open(no_proxy["xl"], encoding="utf-8").read(), no_proxy
     none_left = step("sector.build (every removal refused)", lambda: b.call("sector.build", project=rm_project, scene={"format": 1, "name": "Probe Removals", "objects": []}, removals=asked[3:]))
     assert none_left["xl"] is None and not os.path.exists(only_rm["xl"]) and any("Nothing written" in w for w in none_left["warnings"]), none_left
     if mesh and ent:
