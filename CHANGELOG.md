@@ -12,6 +12,15 @@ How to keep it:
 
 ## Unreleased
 
+### New
+
+- `anims.sync({ path, clips })` reads the sync tracks of a synced animation set's clips: the extra joints past the rig's own (`syncTrajectory`, `syncTrajectory1`, ...), each a partner's Root as seen from this member's Root at the same moment, which WolvenKit's glTF export leaves out. Each track answers `translation` and `rotation` as `{ times, values }`: times in seconds, values in glTF axes as the GLB's own joints, constant keys as one key at time 0. `path` is a game path, a hash or an `.anims` file; without `clips`, every clip. A clip with no extra joints answers `tracks: []`; a SIMD clip with extra joints answers an `error` (not decoded yet). For REDcode's synced sets (issue #19: https://github.com/Edgemodders/REDbridge/issues/19).
+
+### Fixed
+
+- `project.export` of an `.anims` with `rootMotion` writes spline root motion (`animSplineCompressedMotionExtraction`) keyed in seconds. WolvenKit 10.0.0-beta.1 keyed it by the clip's fraction, so the motion played in the clip's first second: the Trauma Team AV's 7.3 s flight in `synced__q001_00c_trauma_arrives_soldiers__av` now ends at 7.3 s. Reported to WolvenKit: https://github.com/WolvenKit/WolvenKit/issues/3304 (issue #19).
+- `project.import` of an `.anims.glb` with a spline root motion clip stores its root motion as linear (`animLinearCompressedMotionExtraction`), keyed in seconds, and says so in `notes`. WolvenKit's spline encoder wrote every joint's keys into the root motion, so the imported clip could not be exported or read again ("Motion extraction in joint 1"). Whether the game plays such a clip as it played the spline one is unverified (issue #19).
+
 ## 0.16.0 (2026-11-19)
 
 ### New

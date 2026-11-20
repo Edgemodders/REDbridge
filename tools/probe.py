@@ -490,6 +490,50 @@ def main():
     print(f"   root moves to z {acc['min'][2]:.2f} in the game's clip, {acc2['min'][2]:.2f} after the round trip")
     assert abs(acc2["min"][2] - acc["min"][2]) < 0.1, (acc["min"], acc2["min"])
 
+    # #19 (REDcode's A3): anims.sync reads a synced clip's partner tracks; spline root motion in seconds.
+    av_set = clip.replace("synced__q001_00c__male_average.anims", "synced__q001_00c__trauma_av.anims")
+    av = "synced__q001_00c_trauma_arrives_soldiers__av"
+    sync = step("anims.sync trauma_av", lambda: b.call("anims.sync", path=av_set))
+    synced = [c for c in sync["clips"] if c["tracks"]]
+    assert synced and all([t["name"] for t in c["tracks"]] == ["syncTrajectory", "syncTrajectory1"] for c in synced), [(c["name"], len(c["tracks"])) for c in sync["clips"]]
+    track = next(c for c in sync["clips"] if c["name"] == av)["tracks"][0]
+    assert track["translation"]["times"][-1] > 7 and len(track["translation"]["times"]) == len(track["translation"]["values"]), track["translation"]["times"][-1]
+    assert all(abs(sum(x * x for x in q) - 1) < 1e-3 for q in track["rotation"]["values"])
+    most = step("anims.sync male_average", lambda: max(len(c["tracks"]) for c in b.call("anims.sync", path=clip)["clips"]))
+    assert most == 7, most
+    try:
+        b.call("anims.sync", path=av_set, clips=["no_such_clip"])
+        raise AssertionError("anims.sync took an unknown clip")
+    except RuntimeError as e:
+        assert "no_such_clip" in str(e), e
+    os.makedirs(os.path.dirname(os.path.join(arc, av_set)), exist_ok=True)
+    b.call("archive.extract", path=av_set, outFile=os.path.join(arc, av_set))
+
+    def root_times(rel, name):
+        j = glb_json(rel)
+        with open(os.path.join(raw, rel), "rb") as f:
+            data = f.read()
+        bin_ = data[20 + struct.unpack_from("<I", data, 12)[0] + 8:]
+        a = next(x for x in j["animations"] if x["name"] == name)
+        ch = next(c for c in a["channels"] if j["nodes"][c["target"]["node"]]["name"] == "Root" and c["target"]["path"] == "translation")
+        acc = j["accessors"][a["samplers"][ch["sampler"]]["input"]]
+        bv = j["bufferViews"][acc["bufferView"]]
+        return struct.unpack_from(f"<{acc['count']}f", bin_, bv.get("byteOffset", 0) + acc.get("byteOffset", 0))
+
+    r = step("project.export spline root motion (the AV's take-off)", lambda: b.call("project.export", file=os.path.join(arc, av_set), archiveDir=arc, rawDir=raw, options={"rootMotion": True, "animations": [av]}))
+    av_glb = next(w for w in r["written"] if w.endswith(".glb"))
+    times = root_times(av_glb, av)
+    print(f"   Root: {len(times)} keys, the last at {times[-1]:.3f} s of a 7.3 s clip")
+    # WolvenKit 10.0.0-beta.1 keys these by fraction (its issue 3304); REDbridge scales them. If a
+    # WolvenKit update fixes it, the last key comes out at 7.3 x 7.3: take REDbridge's scaling out.
+    assert abs(times[-1] - 7.3) < 0.02, times[-1]
+    imp = step("project.import of it (stored as linear)", lambda: b.call("project.import", file=os.path.join(raw, av_glb), rawDir=raw, archiveDir=arc)["anims"])
+    assert next(c for c in imp["clips"] if c["name"] == av)["rootMotion"] == "animLinearCompressedMotionExtraction", imp["clips"]
+    b.call("project.export", file=os.path.join(arc, av_set), archiveDir=arc, rawDir=raw, options={"rootMotion": True, "animations": [av]})
+    again = root_times(av_glb, av)
+    assert len(again) == len(times) and max(abs(x - y) for x, y in zip(times, again)) < 0.01, (len(times), len(again))
+    print(f"   round trip: {len(again)} Root keys at the same times")
+
     b.close()
     print(f"done in {time.time() - t:.1f}s, outputs in {out}")
 

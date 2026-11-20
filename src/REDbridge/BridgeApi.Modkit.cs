@@ -176,8 +176,13 @@ public sealed partial class BridgeApi
             {
                 set.Animations.Add(e);
             }
-            var anim = args.Get<AnimationExportArgs>();
-            ok = Modkit.ExportAnim(animsFile, OutFile(source, archive, rawDir), anim.IsBinary, anim.AdditiveRelativeToLocalTransform, anim.incRootMotion);
+            ok = ExportAnimSet(animsFile, OutFile(source, archive, rawDir), archive, args.Get<AnimationExportArgs>()).Ok;
+            return new ModkitResult(ok, Changed(rawDir, before));
+        }
+        if (ext.Equals("anims", StringComparison.OrdinalIgnoreCase))
+        {
+            // Through REDbridge's own copy of WolvenKit's ExportAnim, for spline root motion in seconds (#19).
+            ok = ExportAnimSet(ReadProjectCr2w(source), OutFile(source, archive, rawDir), archive, args.Get<AnimationExportArgs>()).Ok;
             return new ModkitResult(ok, Changed(rawDir, before));
         }
         var rigPaths = (o.Rigs ?? []).Concat(o.Rig is { } one ? [one] : []).Distinct(StringComparer.OrdinalIgnoreCase).ToList();

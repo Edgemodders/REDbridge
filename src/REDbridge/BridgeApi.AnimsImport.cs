@@ -80,6 +80,8 @@ public sealed partial class BridgeApi
             throw new InvalidOperationException($"{source.Name} has no animations");
         }
 
+        // WolvenKit cannot encode spline root motion; such clips come in as linear, in seconds (#19).
+        var (glb, toLinear) = SplineRootMotionToLinear(source);
         var lines = new List<(string Level, string Text)>();
         var ms = new MemoryStream();
         ms.Write(start);
@@ -89,13 +91,20 @@ public sealed partial class BridgeApi
         {
             try
             {
-                ok = Modkit.ImportAnims(source, ms, new GltfImportArgs { Keep = true });
+                ok = Modkit.ImportAnims(glb, ms, new GltfImportArgs { Keep = true });
             }
             catch (Exception e)
             {
                 // WolvenKit throws for a joint the rig lacks, a morph (weights) channel, two clips of one
                 // name, root motion it cannot encode, or an original clip it cannot copy. Nothing is written.
                 throw new InvalidOperationException($"{source.Name} was not imported: {e.Message}");
+            }
+            finally
+            {
+                if (glb != source)
+                {
+                    try { glb.Directory?.Delete(true); } catch (IOException) { }
+                }
             }
         }
         if (!ok)
@@ -128,6 +137,10 @@ public sealed partial class BridgeApi
             .Select(l => l.Text)
             .Distinct()
             .ToList();
+        if (toLinear.Count > 0)
+        {
+            notes.Add($"Root motion of {string.Join(", ", toLinear)} stored as linear motion extraction (animLinearCompressedMotionExtraction), keyed in seconds: WolvenKit cannot write the spline kind");
+        }
         var anims = new AnimsImport(
             targetRel,
             PathText(after.Rig.DepotPath) is { Length: > 0 } r ? r : null,
