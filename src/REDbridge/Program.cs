@@ -1,15 +1,18 @@
 // REDbridge: hosts WolvenKit's engine behind JSON-RPC 2.0 over stdio.
 //
-//   REDbridge [--game <Cyberpunk 2077 folder>]
+//   REDbridge [--game <Cyberpunk 2077 folder>] [--keys]
 //
 // stdout carries the protocol (Content-Length framed, as language servers do).
 // stderr carries the log. Nothing else may write to stdout.
+// --keys turns on the keys.* methods (the shared key store), for REDcode and MCP servers that
+// read keys; a client that lends its REDbridge to others (REDnode's host) starts it without.
 
 using System.Text.Json;
 using REDbridge;
 using StreamJsonRpc;
 
 string? gameDir = null;
+var keys = false;
 for (var i = 0; i < args.Length; i++)
 {
     switch (args[i])
@@ -17,15 +20,18 @@ for (var i = 0; i < args.Length; i++)
     case "--game" when i + 1 < args.Length:
         gameDir = args[++i];
         break;
+    case "--keys":
+        keys = true;
+        break;
     case "--help" or "-h":
-        Console.Error.WriteLine("usage: REDbridge [--game <Cyberpunk 2077 folder>]");
+        Console.Error.WriteLine("usage: REDbridge [--game <Cyberpunk 2077 folder>] [--keys]");
         return 0;
     }
 }
 gameDir ??= Environment.GetEnvironmentVariable("REDBRIDGE_GAME");
 
-var host = new BridgeHost();
-host.Log.Info($"REDbridge {BridgeHost.Version} starting, WolvenKit {BridgeHost.WolvenKitVersion}");
+var host = new BridgeHost { KeysEnabled = keys };
+host.Log.Info($"REDbridge {BridgeHost.Version} starting, WolvenKit {BridgeHost.WolvenKitVersion}{(keys ? ", with the key store" : "")}");
 
 if (gameDir is not null)
 {

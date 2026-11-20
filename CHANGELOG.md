@@ -12,6 +12,10 @@ How to keep it:
 
 ## Unreleased
 
+### New
+
+- **The shared key store** (`keys.get`, `keys.set`, `keys.delete`, `keys.info`, `keys.list`): the player's AI service keys in `%APPDATA%\Edgemodders\keys`, the files REDnode's in-game Keys window keeps, read and written with Windows DPAPI in .NET, no PowerShell. An environment variable (`OPENAI_API_KEY` and the rest) still wins. `keys.get` with `tool` records which tool read a key in `used-by.json`, as REDnode does; `keys.info` and `keys.list` answer what a Keys view shows, never the key. **Off unless REDbridge is started with `--keys`**, so a client that lends its REDbridge to others (REDnode's host) cannot pass a key on. For REDcode as the keeper of every EDGE tool's keys (K4a; design: https://edgemodders.github.io/REDcode/design/keys.html).
+
 ## 0.17.0 (2026-11-20)
 
 ### New

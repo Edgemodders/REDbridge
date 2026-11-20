@@ -59,6 +59,7 @@ Every method, by group. Each name is `<group>.<method>`, for example `archive.li
 | `sound` | events: the sound event names WolvenKit knows, with their Wwise hashes, which name the event groups in `sfx_container.opusinfo`; importWavs: override game sound effects in a project from `<hash>.wav` files, writing the changed `.opuspak` files and a new index into its `source/archive` (0.9.0) | WolvenKit.Modkit's `soundEvents.json`, `OpusInfo` and opus-tools |
 | `loc` | languages, search (by LocKey, secondary key or words in the texts), get (by LocKey or secondary key): the on-screen texts of the base game and Phantom Liberty, read offline, with a project's own onscreens files laid over them (the ones its `.xl` files name, and any under a language folder); projectFiles (those files for a language); newFile (an empty onscreens file for a project, named in an `.xl`). Spoken lines (for EDGEquest): lines (by stringId, a scene line's `locstringId.ruid`, with the subtitle texts, the `.wem` voice-over files from the voice-over maps and the lengths), searchLines (by words in the texts), projectLinesFiles and newLinesFile (a project's subtitle files, named in an `.xl` under `localization: subtitles:`), with a project's own subtitle files laid over the game's in the same way | WolvenKit.RED4 |
 | `hash` | fnv1a64, resolve | WolvenKit.Core |
+| `keys` | get, set, delete, info, list: the shared key store in `%APPDATA%\Edgemodders\keys` (on `main`, not yet in a release). Off unless REDbridge was started with `--keys` | .NET's DPAPI (`System.Security.Cryptography.ProtectedData`) |
 | `script` | not planned: REDcode dropped its script runner | |
 
 ## Talking to the bridge
@@ -108,6 +109,7 @@ A texture group name works the same way (`"TEXG_Generic_Data"`). An object, `{ "
 | `tools/brand/` | Generates the banner, badges and icon |
 | `src/REDbridge/` | The bridge: host, RPC surface, stderr logger |
 | `tools/probe.py` | Stdlib Python client that runs every method over the real protocol |
+| `tools/keys-check.mjs` | Checks the `keys` methods against REDnode's `keys.mjs`, in a scratch key folder with test keys |
 | `tools/wolvenkit-source.mjs` | Fetches WolvenKit's source at the version the bridge uses into `external/WolvenKit`, for reading (`npm run wolvenkit:source`) |
 | `tools/dotnet.mjs` | Finds the .NET SDK for the npm scripts |
 | `tools/release-notes.mjs` | Prints a release's GitHub notes from `CHANGELOG.md` (`npm run release:notes`) |

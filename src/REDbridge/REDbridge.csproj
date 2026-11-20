@@ -16,6 +16,7 @@
     <PackageReference Include="StreamJsonRpc" Version="2.25.29" />
     <!-- Same version WolvenKit pins, to avoid a mixed set of Microsoft.Extensions assemblies. -->
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.2" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
   </ItemGroup>
 
   <!-- WolvenKit's headless libraries, from WolvenKit's own NuGet packages (GPL-3.0; source at

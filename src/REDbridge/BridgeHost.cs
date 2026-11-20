@@ -45,6 +45,9 @@ public sealed class BridgeHost
     /// <summary>The game folder the archives were loaded from, or null before <see cref="LoadGame"/>.</summary>
     public string? GameDir { get; private set; }
 
+    /// <summary>Whether the keys.* methods answer: only when REDbridge was started with --keys.</summary>
+    public bool KeysEnabled { get; set; }
+
     private ArchiveTree? _tree;
 
     /// <summary>The folder index over the loaded archives, built on first use.</summary>

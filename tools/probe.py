@@ -581,6 +581,14 @@ def main():
     print(f"   the player's syncTrajectory1 against Sandra's syncTrajectory2: within {worst:.2f} deg of each other's inverse")
     assert worst < 1, worst
 
+    # K4a: the key methods answer only a REDbridge started with --keys (tools/keys-check.mjs checks them).
+    try:
+        b.call("keys.list")
+        raise AssertionError("keys.list answered a REDbridge started without --keys")
+    except RuntimeError as e:
+        assert "--keys" in str(e), e
+        print("   keys.* off without --keys:", str(e)[:80], "...")
+
     b.close()
     print(f"done in {time.time() - t:.1f}s, outputs in {out}")
 
