@@ -19,7 +19,7 @@ How to keep it:
 ### Fixed
 
 - `project.export` of an `.anims` with `rootMotion` writes spline root motion (`animSplineCompressedMotionExtraction`) keyed in seconds. WolvenKit 10.0.0-beta.1 keyed it by the clip's fraction, so the motion played in the clip's first second: the Trauma Team AV's 7.3 s flight in `synced__q001_00c_trauma_arrives_soldiers__av` now ends at 7.3 s. Reported to WolvenKit: https://github.com/WolvenKit/WolvenKit/issues/3304 (issue #19).
-- `project.import` of an `.anims.glb` with a spline root motion clip stores its root motion as linear (`animLinearCompressedMotionExtraction`), keyed in seconds, and says so in `notes`. WolvenKit's spline encoder wrote every joint's keys into the root motion, so the imported clip could not be exported or read again ("Motion extraction in joint 1"). Whether the game plays such a clip as it played the spline one is unverified (issue #19).
+- `project.import` of an `.anims.glb` with a spline root motion clip stores its root motion as linear (`animLinearCompressedMotionExtraction`), keyed in seconds, and says so in `notes`. WolvenKit's spline encoder wrote every joint's keys into the root motion, so the imported clip could not be exported or read again ("Motion extraction in joint 1"). Reported to WolvenKit: https://github.com/WolvenKit/WolvenKit/issues/3305. Whether the game plays such a clip as it played the spline one is unverified (issue #19).
 
 ## 0.16.0 (2026-11-19)
 
