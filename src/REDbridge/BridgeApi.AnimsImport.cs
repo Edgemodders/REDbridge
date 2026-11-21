@@ -128,8 +128,9 @@ public sealed partial class BridgeApi
             throw new InvalidOperationException($"None of the {incoming.Count} clips of {source.Name} could be imported: {string.Join("; ", skipped.Select(s => $"{s.Name}: {s.Why}"))}");
         }
 
+        var bytes = ClearFallbackFrames(ms.ToArray(), imported, targetRel, out var cleared);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        File.WriteAllBytes(target, ms.ToArray());
+        File.WriteAllBytes(target, bytes);
 
         var notes = lines
             .Where(l => l.Level is "warn" or "error" || l.Text.Contains("Root Motion", StringComparison.Ordinal))
@@ -137,6 +138,10 @@ public sealed partial class BridgeApi
             .Select(l => l.Text)
             .Distinct()
             .ToList();
+        if (cleared > 0)
+        {
+            notes.Add($"Fallback frames cleared on {cleared} imported clip(s): WolvenKit writes no fallback tables for them, and the game crashes starting a clip that points into missing ones");
+        }
         if (toLinear.Count > 0)
         {
             notes.Add($"Root motion of {string.Join(", ", toLinear)} stored as linear motion extraction (animLinearCompressedMotionExtraction), keyed in seconds: WolvenKit cannot write the spline kind");
@@ -152,6 +157,54 @@ public sealed partial class BridgeApi
             skipped,
             notes);
         return new ModkitResult(true, [targetRel], Anims: anims);
+    }
+
+    /// <summary>
+    /// Empties fallbackFrameIndices on the clips the import wrote. WolvenKit copies each clip's indices from the
+    /// glTF extras (the game clip's, such as [0]) but writes none of the set's fallback tables (fallbackDataAddresses
+    /// and the rest; WolvenKit #1425), so in a new set they point into empty tables, and the game crashed as such a
+    /// clip started (REDcode's animation Probe A, 2026-11-21, an access violation). With the indices empty, as the
+    /// game's own additive clips have them, the clips played. Clips the import kept from the original set keep theirs.
+    /// </summary>
+    private byte[] ClearFallbackFrames(byte[] bytes, IReadOnlyCollection<string> clips, string name, out int cleared)
+    {
+        cleared = 0;
+        using var input = new MemoryStream(bytes);
+        var file = _host.Parser.ReadRed4File(input) ?? throw new InvalidDataException($"{name} is not an animation set");
+        if (file.RootChunk is not animAnimSet set)
+        {
+            throw new InvalidDataException($"{name} is not an animation set");
+        }
+        var wanted = clips.ToHashSet(StringComparer.Ordinal);
+        foreach (var entry in set.Animations)
+        {
+            var anim = entry?.Chunk?.Animation?.Chunk;
+            if (anim is null || !wanted.Contains(anim.Name.GetResolvedText() ?? ""))
+            {
+                continue;
+            }
+            var indices = anim.AnimBuffer?.Chunk switch
+            {
+                animAnimationBufferCompressed c => c.FallbackFrameIndices,
+                animAnimationBufferSimd s => s.FallbackFrameIndices,
+                _ => null,
+            };
+            if (indices is { Count: > 0 })
+            {
+                indices.Clear();
+                cleared++;
+            }
+        }
+        if (cleared == 0)
+        {
+            return bytes;
+        }
+        using var output = new MemoryStream();
+        using (var writer = new CR2WWriter(output, System.Text.Encoding.UTF8, true))
+        {
+            writer.WriteFile(file);
+        }
+        return output.ToArray();
     }
 
     private byte[] ExtractBytes(string gamePath)

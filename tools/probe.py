@@ -481,6 +481,14 @@ def main():
         print("   new set with no rig refused:", str(e)[:90], "...")
     r = step("project.import .anims.glb new on its rig", lambda: b.call("project.import", file=new_glb, rawDir=raw, archiveDir=arc, rig=info[0]["rig"])["anims"])
     assert r["from"] == "rig" and r["added"] == [land_name] and len(r["clips"]) == 1 and r["rig"].lower() == info[0]["rig"].lower(), r
+    # No fallback frames on an imported clip: WolvenKit writes no fallback tables, and the game crashed
+    # starting a clip that pointed into the empty ones (REDcode's animation Probe A, 2026-11-21).
+    assert any(n.startswith("Fallback frames cleared on 1 imported clip") for n in r["notes"]), r["notes"]
+    doc = b.call("cr2w.open", file=os.path.join(arc, "probe", "probe_land.anims"))["doc"]
+    fb = b.call("cr2w.getNode", doc=doc, path="animations.0.Data.animation.Data.animBuffer.Data.fallbackFrameIndices")
+    b.call("cr2w.close", doc=doc)
+    assert fb["total"] == 0, fb
+    print("   the imported clip has no fallback frames, and the import says so")
     # Round trip: the new set exported again moves its root as the game's clip does.
     r = step("project.export of the imported set", lambda: b.call("project.export", file=os.path.join(arc, "probe", "probe_land.anims"), archiveDir=arc, rawDir=raw, options={"rootMotion": True}))
     j2 = glb_json(next(w for w in r["written"] if w.endswith(".glb")))
