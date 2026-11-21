@@ -12,6 +12,10 @@ How to keep it:
 
 ## Unreleased
 
+### Fixed
+
+- **An imported animation no longer crashes the game when it starts.** `project.import` of an `.anims.glb` now clears `fallbackFrameIndices` on each clip it writes, and says so in its notes. WolvenKit copies those from the game clip's extras but writes none of the set's fallback tables (https://github.com/WolvenKit/WolvenKit/issues/1425), so in a new set the clip pointed into empty tables, and the game crashed as it started (REDcode's animation Probe A, 2026-11-21). With them cleared, as the game's own additive clips have them, the clips play in the game. Clips kept from the original set keep theirs.
+
 ## 0.18.0 (2026-11-21)
 
 ### New
