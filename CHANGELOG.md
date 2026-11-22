@@ -12,6 +12,8 @@ How to keep it:
 
 ## Unreleased
 
+## 0.19.0 (2026-11-22)
+
 ### New
 
 - **Uthana in the key store:** `keys.list` and `keys.info` name the service `uthana` (Uthana, for REDcode's made animations), and `UTHANA_API_KEY` wins over its saved key, as each service's variable does.
