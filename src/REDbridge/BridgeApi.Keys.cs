@@ -29,6 +29,7 @@ public sealed partial class BridgeApi
         ["openai"] = new("OpenAI", "sk-", "OPENAI_API_KEY"),
         ["elevenlabs"] = new("ElevenLabs", null, "ELEVENLABS_API_KEY"),
         ["tripo"] = new("Tripo", null, "TRIPO_API_KEY"),
+        ["uthana"] = new("Uthana", null, "UTHANA_API_KEY"),
     };
 
     private static readonly Regex ServiceId = new("^[a-z0-9][a-z0-9-]{0,39}$");
