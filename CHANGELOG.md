@@ -12,6 +12,10 @@ How to keep it:
 
 ## Unreleased
 
+### New
+
+- **The game in an editor tab** (`window.find`, `window.dock`, `window.undock`, `window.state`; issue #22: https://github.com/Edgemodders/REDbridge/issues/22): `window.dock` keeps a window, such as the game's (`W2ViewportClass`), on a VS Code webview found by its page title through UI Automation. The window is owned by VS Code's window, its frame taken off, placed at the webview's corner (centred when the webview is bigger) and never resized, clipped to the webview, hidden while the webview is not shown, and put back if it moves or gets its frame again. A release key (Ctrl+Alt+Backspace by default) frees the pointer and gives the focus to VS Code. Notifications: `window.released`, `window.lost`, `window.focus`, `window.shown`. **Off unless REDbridge is started with `--windows`**, so a REDbridge lent to others (REDnode's host) cannot move other programs' windows. Windows only. For REDcode's Game view.
+
 ## 0.19.0 (2026-11-22)
 
 ### New

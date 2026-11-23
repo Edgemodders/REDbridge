@@ -48,6 +48,12 @@ public sealed class BridgeHost
     /// <summary>Whether the keys.* methods answer: only when REDbridge was started with --keys.</summary>
     public bool KeysEnabled { get; set; }
 
+    /// <summary>Whether the window.* methods answer: only when REDbridge was started with --windows (#22).</summary>
+    public bool WindowsEnabled { get; set; }
+
+    /// <summary>The connection to the client, for notifications (window.released and the rest).</summary>
+    public StreamJsonRpc.JsonRpc? Rpc { get; set; }
+
     private ArchiveTree? _tree;
 
     /// <summary>The folder index over the loaded archives, built on first use.</summary>
