@@ -267,6 +267,40 @@ def main():
     except RuntimeError as e:
         print("   not a sector:", str(e)[:90])
 
+    # cr2w inside parsed buffers (issue #24, from REDcode): an instanced mesh node's inner nodes and its transforms.
+    kab = "base\\worlds\\03_night_city\\_compiled\\default\\exterior_-11_11_0_1.streamingsector"
+    kdoc = b.call("cr2w.open", path=kab)["doc"]
+    kbuf = step("cr2w.getNode (a worldInstancedMeshNodeBuffer)", lambda: (lambda n: (n["kind"], n["type"], [(c["name"], c["count"]) for c in n["children"]]))(b.call("cr2w.getNode", doc=kdoc, path="nodes.179.Data.buffer.Data")))
+    assert kbuf == ("class", "worldInstancedMeshNodeBuffer", [("InnerNodes", 570), ("TransformRanges", 570)]), kbuf
+    ktr = b.call("cr2w.getNode", doc=kdoc, path="nodes.179.Data.cookedWorldTransformsBuffer.Data")
+    assert ktr["type"] == "WorldTransformsBuffer" and ktr["children"][0]["count"] == 2314, ktr
+    kmesh = b.call("cr2w.getNode", doc=kdoc, path="nodes.179.Data.buffer.Data.InnerNodes.541.mesh")["value"]
+    assert "wat_kab_building_f_ceiling" in kmesh["DepotPath"]["$value"], kmesh
+    khits = step("cr2w.search (inside the buffer)", lambda: b.call("cr2w.search", doc=kdoc, query="wat_kab_building_f_ceiling", limit=1000))
+    assert any(h["path"] == "nodes.179.Data.buffer.Data.InnerNodes.541.mesh" for h in khits["hits"]), khits["total"]
+    ksaved = os.path.join(out, "kabuki.streamingsector")
+    b.call("cr2w.save", doc=kdoc, outFile=ksaved)
+    b.call("cr2w.close", doc=kdoc)
+    korig = os.path.join(out, "kabuki.original.streamingsector")
+    b.call("archive.extract", path=kab, outFile=korig)
+    with open(korig, "rb") as f1, open(ksaved, "rb") as f2:
+        # WolvenKit re-encodes a few bytes of a sector (header, some node fields), as 0.17.0 did: same size, not the same bytes.
+        assert len(f1.read()) == len(f2.read()), "an unchanged save changed the sector's size"
+    kdoc = b.call("cr2w.open", file=ksaved)["doc"]
+    kinv = b.call("cr2w.patch", doc=kdoc, ops=[
+        {"op": "replace", "path": "nodes.179.Data.buffer.Data.InnerNodes.541.forcedAutoHideDistance", "value": 123.5},
+        {"op": "replace", "path": "nodes.179.Data.cookedWorldTransformsBuffer.Data.Transforms.0.scale.X", "value": 2.5},
+    ])["inverse"]
+    b.call("cr2w.save", doc=kdoc)
+    b.call("cr2w.close", doc=kdoc)
+    kdoc = b.call("cr2w.open", file=ksaved)["doc"]
+    kback = [b.call("cr2w.getNode", doc=kdoc, path=q)["value"] for q in ("nodes.179.Data.buffer.Data.InnerNodes.541.forcedAutoHideDistance", "nodes.179.Data.cookedWorldTransformsBuffer.Data.Transforms.0.scale.X")]
+    assert abs(kback[0] - 123.5) < 1e-3 and abs(kback[1] - 2.5) < 1e-4, kback
+    b.call("cr2w.patch", doc=kdoc, ops=kinv)
+    assert b.call("cr2w.getNode", doc=kdoc, path="nodes.179.Data.buffer.Data.InnerNodes.541.forcedAutoHideDistance")["value"] == kinv[1]["value"]
+    b.call("cr2w.close", doc=kdoc)
+    print("   patched inside both buffers, saved, read back, undone:", kback)
+
     # sector.build removals (issue #18, for EDGEbuilder's doors): ArchiveXL node deletions in the .xl, checked against the sector.
     rm_project = os.path.join(out, "removal-project")
     shutil.rmtree(rm_project, ignore_errors=True)

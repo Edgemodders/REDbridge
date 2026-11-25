@@ -1,5 +1,7 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
 using StreamJsonRpc;
 using WolvenKit.RED4.Archive.Buffer;
@@ -15,6 +17,9 @@ namespace REDbridge;
 /// editor has it open; the editor reads one node at a time and sends edits as JSON Patch operations.
 /// Paths are dotted, from the root chunk, and match the paths in WolvenKit's JSON: property names,
 /// array indices, "Data" under a handle or a buffer, "Chunks" under a package.
+/// A buffer WolvenKit parses into its own classes (worldInstancedMeshNodeBuffer, WorldTransformsBuffer
+/// and the other IParseableBuffer types) is walked like a class, its fields by their C# names, as in
+/// WolvenKit's JSON (issue #24).
 /// See REDcode's docs/design/cr2w-editor.md.
 /// </summary>
 public sealed partial class BridgeApi
@@ -153,6 +158,12 @@ public sealed partial class BridgeApi
                 return int.TryParse(segment, NumberStyles.None, CultureInfo.InvariantCulture, out var index) && index >= 0 && index < list.Count
                     ? list[index]
                     : throw new KeyNotFoundException($"'{fullPath}': index '{segment}' is outside 0..{list.Count - 1}");
+            case not null when IsParsed(current):
+                foreach (var (name, value) in ParsedPropertiesOf(current))
+                {
+                    if (name == segment) return value;
+                }
+                throw new KeyNotFoundException($"'{fullPath}': {TypeNameOf(current)} has no field '{segment}'");
             case null:
                 throw new KeyNotFoundException($"'{fullPath}': nothing at '{segment}', the parent is null");
             default:
@@ -168,8 +179,48 @@ public sealed partial class BridgeApi
         RedPackage => "package",
         IList => "array",
         RedBaseClass => "class",
+        _ when IsParsed(value) => "class",
         _ => "value",
     };
+
+    /// <summary>
+    /// An object of a buffer WolvenKit parses into its own classes rather than RED classes: the buffer
+    /// itself (worldInstancedMeshNodeBuffer, WorldTransformsBuffer, CGIDataBuffer, ...) and the plain
+    /// classes inside some of them (CGIBrck, FacialTransform). Walked like a class, by its C# properties.
+    /// </summary>
+    private static bool IsParsed(object? value) =>
+        value is not (null or RedBaseClass or IList or IRedBaseHandle or IRedBufferWrapper or RedPackage or string)
+        && !value.GetType().IsValueType
+        && (value is IParseableBuffer || value.GetType().Namespace == "WolvenKit.RED4.Archive.Buffer");
+
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> ParsedProperties = new();
+
+    private static PropertyInfo[] ParsedPropertyInfos(Type type) => ParsedProperties.GetOrAdd(type, t => t
+        .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+        .Where(p => p.CanRead && p.GetIndexParameters().Length == 0 && typeof(IRedType).IsAssignableFrom(p.PropertyType))
+        .ToArray());
+
+    /// <summary>A parsed object's fields: its public properties that hold RED values, by their C# names.</summary>
+    private static IEnumerable<(string name, object? value)> ParsedPropertiesOf(object obj)
+    {
+        var values = ParsedPropertyInfos(obj.GetType()).Select(p => (p.Name, value: (object?)p.GetValue(obj))).ToList();
+        foreach (var (name, value) in values)
+        {
+            // IParseableBuffer.Data is null on most buffers, or the same list as a named field
+            // (CookedInstanceTransformsBuffer.Transforms): shown only when it is something else, such as
+            // an embedded file's root chunk.
+            if (name == nameof(IParseableBuffer.Data) && obj is IParseableBuffer
+                && (value is null || values.Any(v => v.Name != name && ReferenceEquals(v.value, value))))
+            {
+                continue;
+            }
+            yield return (name, value);
+        }
+    }
+
+    private static PropertyInfo ParsedProperty(object obj, string name, string path) =>
+        ParsedPropertyInfos(obj.GetType()).FirstOrDefault(p => p.Name == name)
+        ?? throw new KeyNotFoundException($"'{path}': {TypeNameOf(obj)} has no field '{name}'");
 
     private static string TypeNameOf(object? value)
     {
@@ -178,8 +229,9 @@ public sealed partial class BridgeApi
             case null: return "null";
             case RedPackage: return "RedPackage";
             case List<RedBaseClass>: return "array:RedBaseClass";
+            case not null when IsParsed(value): return value.GetType().Name;
             case IRedType t:
-                try { return RedReflection.GetRedTypeFromCSType(t.GetType()); }
+                try { var red = RedReflection.GetRedTypeFromCSType(t.GetType()); return string.IsNullOrEmpty(red) ? t.GetType().Name : red; }
                 catch { return t.GetType().Name; }
             default: return value.GetType().Name;
         }
@@ -212,6 +264,8 @@ public sealed partial class BridgeApi
             }
             case RedPackage package:
                 return new NodeDto(path, kind, type, null, new List<NodeChild> { ChildOf("Chunks", package.Chunks) }, null, null);
+            case not null when IsParsed(node):
+                return new NodeDto(path, kind, type, null, ParsedPropertiesOf(node).Select(p => ChildOf(p.name, p.value)).ToList(), null, null);
             case IList list:
             {
                 var children = new List<NodeChild>();
@@ -288,6 +342,8 @@ public sealed partial class BridgeApi
                 return b.Buffer.Data is null ? $"{bytes:N0} bytes" : $"{bytes:N0} bytes, {TypeNameOf(b.Buffer.Data)}";
             }
             case "package": return $"{((RedPackage)value!).Chunks.Count} chunks";
+            case "class" when value is not RedBaseClass:
+                return type;
             case "class":
             {
                 var cls = (RedBaseClass)value!;
@@ -387,6 +443,10 @@ public sealed partial class BridgeApi
                     if (!cls.ResetProperty(last)) throw new KeyNotFoundException($"'{op.Path}': no property '{last}' to remove");
                     return new PatchOp("replace", op.Path, old is null ? null : ToElement(old));
                 }
+                if (IsParsed(parent))
+                {
+                    throw new ArgumentException($"remove '{op.Path}': a field of a parsed buffer cannot be removed; replace it");
+                }
                 throw new ArgumentException($"remove '{op.Path}': only array items and class properties can be removed");
             }
             case "move":
@@ -437,6 +497,8 @@ public sealed partial class BridgeApi
                 return handle.InnerType;
             case IList:
                 return ElementType(parent);
+            case not null when IsParsed(parent):
+                return ParsedProperty(parent, last, path).PropertyType;
             default:
                 throw new ArgumentException($"'{path}': cannot set '{last}' under a {KindOf(parent)}");
         }
@@ -479,6 +541,13 @@ public sealed partial class BridgeApi
             case IList list:
                 list[ParseIndex(last, list.Count, path)] = value;
                 break;
+            case not null when IsParsed(parent):
+            {
+                var prop = ParsedProperty(parent, last, path);
+                if (!prop.CanWrite) throw new ArgumentException($"'{path}': '{last}' of {TypeNameOf(parent)} cannot be set");
+                prop.SetValue(parent, value);
+                break;
+            }
             default:
                 throw new ArgumentException($"'{path}': cannot set '{last}' under a {KindOf(parent)}");
         }
@@ -554,6 +623,14 @@ public sealed partial class BridgeApi
                     return;
                 case RedPackage package:
                     Visit(package.Chunks, Join(nodePath, "Chunks"), name, depth + 1);
+                    return;
+                case not null when IsParsed(node):
+                    if (!stack.Add(node)) return;
+                    foreach (var (fieldName, value) in ParsedPropertiesOf(node))
+                    {
+                        Visit(value, Join(nodePath, fieldName), fieldName, depth + 1);
+                    }
+                    stack.Remove(node);
                     return;
                 case IList list:
                     for (var i = 0; i < list.Count; i++)
