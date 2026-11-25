@@ -267,6 +267,19 @@ def main():
     except RuntimeError as e:
         print("   not a sector:", str(e)[:90])
 
+    # Variants with their ranges, and sectors that mods and projects add (issue #23, for REDcode's sector layers).
+    withv = step("sector.find (variants)", lambda: (lambda r: (r["total"], sum(1 for s in r["sectors"] if s["variants"])))(b.call("sector.find", variants=True)))
+    vsecs = [s for s in b.call("sector.find", variants=True, kinds=["exterior"])["sectors"] if s["variants"]]
+    assert withv[0] == every["total"] and vsecs and all(isinstance(v["id"], str) and isinstance(v["rangeIndex"], int) for v in vsecs[0]["variants"]), withv
+    ranged = b.call("sector.nodes", path=vsecs[0]["path"], ranges=True)
+    rs = [i["range"] for i in ranged["items"]]
+    assert rs == sorted(rs) and all(0 <= v["rangeIndex"] < ranged["ranges"] for v in vsecs[0]["variants"]), (rs[:10], ranged["ranges"])
+    print(f"   {withv[1]} sectors with variants; {vsecs[0]['path'].split(chr(92))[-1]}: {ranged['ranges']} ranges, base {ranged['baseRange']}, variants", [(v["name"], v["rangeIndex"]) for v in vsecs[0]["variants"]][:4])
+    from_mods = step("sector.find (sources: mods)", lambda: (lambda r: (r["total"], [(s["mod"], s["archive"]) for s in r["sectors"]][:3], r.get("warnings")))(b.call("sector.find", sources=["mods"])))
+    if os.path.isdir(os.path.join(out, "project")):
+        mine = step("sector.find (sources: project)", lambda: b.call("sector.find", sources=["project"], project=os.path.join(out, "project")))
+        assert mine["total"] >= 1 and all(s["source"] == "project" and s["archive"] for s in mine["sectors"]), mine
+
     # cr2w inside parsed buffers (issue #24, from REDcode): an instanced mesh node's inner nodes and its transforms.
     kab = "base\\worlds\\03_night_city\\_compiled\\default\\exterior_-11_11_0_1.streamingsector"
     kdoc = b.call("cr2w.open", path=kab)["doc"]

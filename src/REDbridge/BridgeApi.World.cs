@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Reflection;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using StreamJsonRpc;
 using WolvenKit.RED4.Archive.Buffer;
@@ -29,11 +30,37 @@ public sealed partial class BridgeApi
     /// <c>exterior_-12_-7_0_1</c>, null for names without a grid. <see cref="Block"/> is "base" or
     /// "ep1", the streaming block that lists it. <see cref="Replaces"/> is true for a Phantom Liberty
     /// sector whose path the base block lists too: the game streams Phantom Liberty's.
-    /// <see cref="Variants"/> counts the sector's named variants (node ranges a quest switches on or off).
+    /// <see cref="Variants"/> counts the sector's named variants (node ranges a quest switches on or off),
+    /// or lists them (<see cref="SectorVariant"/>) when sector.find is asked for <c>variants</c>.
+    /// <see cref="Source"/> is "game", "mod" (a sector an installed mod adds through an ArchiveXL
+    /// <c>.xl</c>, named by <see cref="Mod"/>) or "project" (one a project's own <c>.xl</c> adds).
+    /// For those, <see cref="Block"/> is the streaming block's path.
     /// </summary>
-    public sealed record SectorEntry(string Path, string Kind, int[]? Grid, int Level, Bounds Box, string Block, string? Archive, bool Replaces, int Variants);
+    public sealed record SectorEntry(
+        string Path,
+        string Kind,
+        int[]? Grid,
+        int Level,
+        Bounds Box,
+        string Block,
+        string? Archive,
+        bool Replaces,
+        object Variants,
+        string Source = "game",
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Mod = null);
 
-    public sealed record SectorList(int Total, IReadOnlyList<SectorEntry> Sectors);
+    /// <summary>
+    /// A named variant of a sector (issue #23): a range of its node-data entries that a quest switches
+    /// on or off. <see cref="RangeIndex"/> is the range sector.nodes gives each entry with
+    /// <c>ranges</c>. Ids are text, as 64-bit values are elsewhere; <see cref="NodeRef"/> is the
+    /// variant's node reference, its path when known, else its hash.
+    /// </summary>
+    public sealed record SectorVariant(string Name, string Id, string Parent, int RangeIndex, bool EnabledByDefault, string? NodeRef);
+
+    public sealed record SectorList(
+        int Total,
+        IReadOnlyList<SectorEntry> Sectors,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
 
     private static readonly (string Block, string Path)[] WorldBlocks =
     [
@@ -44,18 +71,60 @@ public sealed partial class BridgeApi
     private static readonly Regex GridName = new(@"_(-?\d+)_(-?\d+)_(-?\d+)_(\d+)\.streamingsector$", RegexOptions.Compiled);
 
     private List<SectorEntry>? _sectors;
+    private Dictionary<string, List<SectorVariant>>? _sectorVariants;
     private string? _sectorsGame;
 
     /// <summary>
     /// The game's streaming sectors, optionally only those whose streaming box meets
     /// <paramref name="box"/>, whose kind is in <paramref name="kinds"/> and whose level is in
     /// <paramref name="levels"/>. The whole list is read once per bridge (a few seconds) and kept.
+    /// <paramref name="variants"/> lists each sector's variants by name in place of their count
+    /// (issue #23). <paramref name="sources"/> picks where sectors come from: "game" (the default),
+    /// "mods" (sectors installed mods add through ArchiveXL <c>.xl</c> files under
+    /// <c>streaming: blocks:</c>, read from archive\pc\mod) and "project" (those a project's own
+    /// <c>.xl</c> files add, read from <paramref name="project"/>'s source folder).
     /// </summary>
     [JsonRpcMethod("sector.find")]
-    public SectorList FindSectors(Bounds? box = null, IReadOnlyList<string>? kinds = null, IReadOnlyList<int>? levels = null)
+    public SectorList FindSectors(Bounds? box = null, IReadOnlyList<string>? kinds = null, IReadOnlyList<int>? levels = null, bool variants = false, IReadOnlyList<string>? sources = null, string? project = null)
     {
         RequireGame();
-        var all = AllSectors();
+        var from = new HashSet<string>(sources is { Count: > 0 } ? sources : ["game"], StringComparer.OrdinalIgnoreCase);
+        foreach (var src in from)
+        {
+            if (src is not ("game" or "mods" or "mod" or "project"))
+            {
+                throw new ArgumentException($"Unknown source '{src}': use game, mods or project");
+            }
+        }
+        var all = new List<SectorEntry>();
+        var variantsOf = new Dictionary<string, List<SectorVariant>>(StringComparer.OrdinalIgnoreCase);
+        List<string>? warnings = null;
+        if (from.Contains("game"))
+        {
+            all.AddRange(AllSectors());
+            if (variants)
+            {
+                foreach (var (k, v) in _sectorVariants!) variantsOf[k] = v;
+            }
+        }
+        if (from.Contains("mods") || from.Contains("mod"))
+        {
+            var mods = ModSectors();
+            all.AddRange(mods.Sectors);
+            foreach (var (k, v) in mods.Variants) variantsOf[k] = v;
+            (warnings ??= new()).AddRange(mods.Warnings);
+        }
+        if (from.Contains("project"))
+        {
+            if (string.IsNullOrEmpty(project))
+            {
+                throw new ArgumentException("The project source needs project, the project's folder");
+            }
+            var mine = ProjectSectors(project);
+            all.AddRange(mine.Sectors);
+            foreach (var (k, v) in mine.Variants) variantsOf[k] = v;
+            (warnings ??= new()).AddRange(mine.Warnings);
+        }
         IEnumerable<SectorEntry> hits = all;
         if (box is not null)
         {
@@ -76,8 +145,21 @@ public sealed partial class BridgeApi
             hits = hits.Where(s => set.Contains(s.Level));
         }
         var list = hits.ToList();
-        return new SectorList(list.Count, list);
+        if (variants)
+        {
+            list = list.Select(e => e with { Variants = variantsOf.TryGetValue(e.Path + "|" + e.Source + "|" + e.Mod, out var v) ? v : new List<SectorVariant>() }).ToList();
+        }
+        return new SectorList(list.Count, list, warnings is { Count: > 0 } ? warnings : null);
     }
+
+    /// <summary>A descriptor's variants, for sector.find's <c>variants</c>.</summary>
+    private static List<SectorVariant> VariantsOf(worldStreamingSectorDescriptor d) => d.Variants.Select(v => new SectorVariant(
+        v.Name.GetResolvedText() ?? v.Name.ToString() ?? "",
+        ((uint)v.VariantId).ToString(System.Globalization.CultureInfo.InvariantCulture),
+        ((uint)v.ParentVariantID).ToString(System.Globalization.CultureInfo.InvariantCulture),
+        (int)(uint)v.RangeIndex,
+        v.EnabledByDefault,
+        v.NodeRef.GetResolvedText() is { Length: > 0 } text ? text : ((ulong)v.NodeRef.GetRedHash() == 0 ? null : v.NodeRef.GetRedHash().ToString(System.Globalization.CultureInfo.InvariantCulture)))).ToList();
 
     private static bool Meets(Bounds a, Bounds b) =>
         a.Min[0] <= b.Max[0] && a.Max[0] >= b.Min[0] &&
@@ -114,6 +196,7 @@ public sealed partial class BridgeApi
             StringComparer.OrdinalIgnoreCase);
         var read = DateTime.Now;
         var result = new List<SectorEntry>(perBlock.Count);
+        var variantLists = new Dictionary<string, List<SectorVariant>>(StringComparer.OrdinalIgnoreCase);
         foreach (var (block, d) in perBlock)
         {
             var path = d.Data.DepotPath.GetResolvedText() ?? ((ulong)d.Data.DepotPath).ToString();
@@ -128,8 +211,10 @@ public sealed partial class BridgeApi
             var archive = file.HasValue ? file.Value.GetArchive().Name : null;
             var replaces = block == "ep1" && basePaths.Contains(path);
             result.Add(new SectorEntry(path, KindOf(d.Category), grid, (byte)d.Level, BoundsOf(d.StreamingBox), block, archive, replaces, d.Variants.Count));
+            variantLists[path + "|game|"] = VariantsOf(d);
         }
         _sectors = result;
+        _sectorVariants = variantLists;
         _sectorsGame = _host.GameDir;
         _host.Log.Info($"sector.find: {result.Count:N0} sectors in {(DateTime.Now - started).TotalSeconds:F1} s (blocks read in {(read - started).TotalSeconds:F1} s)");
         return result;
@@ -179,9 +264,23 @@ public sealed partial class BridgeApi
         Placement Transform,
         IReadOnlyList<Placement>? Instances,
         NodeStreaming Streaming,
-        Bounds? Bounds);
+        Bounds? Bounds,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Range = null);
 
-    public sealed record SectorNodes(string Path, string Kind, int Level, int Nodes, int Total, IReadOnlyList<NodeEntry> Items, IReadOnlyList<string> Warnings);
+    /// <summary>
+    /// With <c>ranges</c>, <see cref="BaseRange"/> is the range of entries every variant keeps (the
+    /// sector's persistent range, 0 in the game's sectors) and <see cref="Ranges"/> how many there are.
+    /// </summary>
+    public sealed record SectorNodes(
+        string Path,
+        string Kind,
+        int Level,
+        int Nodes,
+        int Total,
+        IReadOnlyList<NodeEntry> Items,
+        IReadOnlyList<string> Warnings,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? BaseRange = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Ranges = null);
 
     private readonly Dictionary<string, Bounds?> _meshBounds = new(StringComparer.OrdinalIgnoreCase);
 
@@ -191,9 +290,12 @@ public sealed partial class BridgeApi
     /// <paramref name="bounds"/> reads each mesh's bounds (once per mesh per bridge) to give every
     /// mesh item a world box; without it, only instanced meshes have one, from the sector itself.
     /// <paramref name="archive"/> and <paramref name="root"/> read a mod's sector (issue #12's lookup).
+    /// <paramref name="ranges"/> gives each item the range of node-data entries it is in (issue #23):
+    /// a sector's entries are kept in ranges, one the base that is always on, the others switched by
+    /// the variants sector.find lists with their <c>rangeIndex</c>.
     /// </summary>
     [JsonRpcMethod("sector.nodes")]
-    public SectorNodes SectorNodesOf(string path, IReadOnlyList<string>? kinds = null, bool bounds = false, string? archive = null, string? root = null)
+    public SectorNodes SectorNodesOf(string path, IReadOnlyList<string>? kinds = null, bool bounds = false, string? archive = null, string? root = null, bool ranges = false)
     {
         using var mods = ModFiles.Open(_host, archive, root);
         var (name, cr2w) = ReadResource(path, mods);
@@ -220,6 +322,17 @@ public sealed partial class BridgeApi
         }
 
         var items = new List<NodeEntry>();
+        // A range starts at its entry in variantIndices and runs to the next one's start (WolvenKit's reader splits them the same way).
+        var starts = sector.VariantIndices.Select(v => (int)v).ToList();
+        int RangeOf(int entry)
+        {
+            var r = -1;
+            for (var k = 0; k < starts.Count; k++)
+            {
+                if (starts[k] <= entry) r = k;
+            }
+            return Math.Max(r, 0);
+        }
         var i = -1;
         foreach (var e in data)
         {
@@ -283,9 +396,12 @@ public sealed partial class BridgeApi
                 place,
                 instances,
                 new NodeStreaming(e.StreamingDistance, e.SecondaryRefPointDistance >= float.MaxValue ? null : e.SecondaryRefPointDistance),
-                world));
+                world,
+                ranges ? RangeOf(i) : null));
         }
-        return new SectorNodes(name, KindOf(sector.Category), sector.Level, sector.Nodes.Count, items.Count, items, warnings);
+        return ranges
+            ? new SectorNodes(name, KindOf(sector.Category), sector.Level, sector.Nodes.Count, items.Count, items, warnings, (int)sector.PersisentNodeIndex, Math.Max(starts.Count, 1))
+            : new SectorNodes(name, KindOf(sector.Category), sector.Level, sector.Nodes.Count, items.Count, items, warnings);
     }
 
     private static Placement PlacementOf(worldCompiledNodeInstanceSetupInfo e)
