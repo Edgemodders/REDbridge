@@ -42,6 +42,7 @@ REDbridge is the .NET process that hosts WolvenKit's headless libraries and expo
 
 ## Conventions
 
+- **Writing files on this PC:** follow the section of that name in REDnode's `CLAUDE.md` (Windows, Git Bash, PowerShell 5.1): Write and Edit for file content, never a heredoc, `node -e`, `python -c` or `sed`; read the diff after a scripted change; files are LF (`.gitattributes`).
 - Commit straight to `main` and push, in small logical commits. Agree the plan in chat first. PRs only for large or risky changes.
 - Git identity is set per repo to `CyberbuildsAI` with the GitHub no-reply email. Never change the global identity.
 - Record every tool install in `docs/dev-setup.md`, with versions and exact commands.
