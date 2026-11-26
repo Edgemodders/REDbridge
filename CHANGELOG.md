@@ -12,6 +12,8 @@ How to keep it:
 
 ## Unreleased
 
+## 0.20.0 (2026-11-26)
+
 ### New
 
 - **A sector's variants and the sectors mods add** (issue #23: https://github.com/Edgemodders/REDbridge/issues/23), for REDcode's sector layers. `sector.find { variants: true }` lists each sector's variants by name in place of their count, each with `id`, `parent`, `rangeIndex`, `enabledByDefault` and `nodeRef` (ids as text); `sector.nodes { ranges: true }` gives each entry its `range`, with `baseRange` (the range every variant keeps, 0 in the game's sectors) and the number of `ranges`. `sector.find { sources: ["game", "mods", "project"] }` adds the sectors installed mods add through ArchiveXL `.xl` files under `streaming: blocks:` (read from `archive\pc\mod`, each with `source: "mod"`, `mod` its `.xl`, `block` its streaming block and `archive` the mod archive that holds it), and those a project's own `.xl` files add (`project`, the project's folder). The default is the game's sectors alone, as before; every sector now says its `source`. An `.xl` that cannot be read, or a block found in no mod archive, comes back in `warnings`.
