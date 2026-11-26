@@ -29,9 +29,16 @@ public sealed partial class BridgeApi
     /// <summary>The window to dock onto: by handle, or by process (its own or one of its parents) and a part of its title.</summary>
     public sealed record OwnerSpec(int? Pid = null, string? Title = null, long? Hwnd = null);
 
-    /// <summary>What <c>window.state</c> answers.</summary>
+    /// <summary>
+    /// Real pixels of the webview to leave free on each side (#22: REDcode's tab keeps a status line
+    /// at its bottom). The window is centred and clipped inside the webview's rectangle less these.
+    /// </summary>
+    public sealed record WinInset(int Left = 0, int Top = 0, int Right = 0, int Bottom = 0);
+
+    /// <summary>What <c>window.state</c> answers. <c>Hung</c>: the window does not answer Windows (IsHungAppWindow); its owner is cleared meanwhile.</summary>
     public sealed record WindowDockState(bool Docked, string? Class, long Hwnd, long Owner, string? Webview, WinRect? WebviewRect,
-        WinRect? WindowRect, bool Shown, bool Focused, string? ReleaseKey, bool ReleaseKeyRegistered, string? Ended);
+        WinRect? WindowRect, bool Shown, bool Focused, string? ReleaseKey, bool ReleaseKeyRegistered, string? Ended,
+        WinInset? Inset = null, bool Hung = false);
 
     private WindowDocker? _docker;
     private readonly object _dockLock = new();
@@ -71,15 +78,21 @@ public sealed partial class BridgeApi
     /// Starts keeping a window of <paramref name="class"/> on a webview of the <paramref name="owner"/>
     /// window: the UI Automation Document element whose name is <paramref name="webview"/> (the page's
     /// <c>&lt;title&gt;</c>). <paramref name="releaseKey"/> (Ctrl+Alt+Backspace by default, or e.g.
-    /// "Pause") frees the pointer and gives the focus to the owner. A window already docked is undocked first.
+    /// "Pause") frees the pointer and gives the focus to the owner. <paramref name="inset"/> leaves real
+    /// pixels of the webview free on each side. A window already docked is undocked first.
     /// </summary>
     [JsonRpcMethod("window.dock")]
-    public WindowDockState WindowDock(string @class, OwnerSpec owner, string webview, string? releaseKey = null, int? pid = null)
+    public WindowDockState WindowDock(string @class, OwnerSpec owner, string webview, string? releaseKey = null, int? pid = null, WinInset? inset = null)
     {
         RequireWindows();
         if (string.IsNullOrWhiteSpace(webview))
         {
             throw new ArgumentException("webview is the page's title, as UI Automation names its Document element");
+        }
+        inset ??= new WinInset();
+        if (inset.Left < 0 || inset.Top < 0 || inset.Right < 0 || inset.Bottom < 0)
+        {
+            throw new ArgumentException("inset: each side is 0 or more real pixels");
         }
         var game = Win.FindTop(@class, pid);
         if (game == IntPtr.Zero)
@@ -100,7 +113,7 @@ public sealed partial class BridgeApi
         lock (_dockLock)
         {
             _docker?.Stop();
-            docker = _docker = new WindowDocker(_host, @class, game, ownerHwnd, webview, key);
+            docker = _docker = new WindowDocker(_host, @class, game, ownerHwnd, webview, key, inset);
         }
         docker.Start();
         docker.WaitFirstTick(TimeSpan.FromSeconds(3));
@@ -236,8 +249,13 @@ public sealed partial class BridgeApi
         private Uia.Element? _element;
         private long _nextFind;
         private int _misses;
+        private readonly WinInset _inset;
+        private readonly int _gamePid;
+        private bool _hung;
+        private long _unclipUntil;
+        private long? _frameStyle; // the style the frame was taken off, put back at undock
 
-        public WindowDocker(BridgeHost host, string cls, IntPtr game, IntPtr owner, string webview, HotKey key)
+        public WindowDocker(BridgeHost host, string cls, IntPtr game, IntPtr owner, string webview, HotKey key, WinInset inset)
         {
             _host = host;
             _class = cls;
@@ -245,6 +263,8 @@ public sealed partial class BridgeApi
             _owner = owner;
             _webview = webview;
             _key = key;
+            _inset = inset;
+            _gamePid = Win.PidOf(game);
         }
 
         public void Start()
@@ -270,7 +290,7 @@ public sealed partial class BridgeApi
             lock (_stateLock)
             {
                 return new WindowDockState(_ended is null && _thread is { IsAlive: true }, _class, _game, _owner, _webview, _webviewRect,
-                    _windowRect, _shown, _focused, _key.Text, _keyRegistered, _ended);
+                    _windowRect, _shown, _focused, _key.Text, _keyRegistered, _ended, _inset, _hung);
             }
         }
 
@@ -328,6 +348,12 @@ public sealed partial class BridgeApi
                             Release();
                         }
                     }
+                    // The game clips the pointer again while it has the focus: keep freeing it for a
+                    // second after the release key (REDcode's script does the same).
+                    if (Environment.TickCount64 < _unclipUntil)
+                    {
+                        Win.ClipCursor(IntPtr.Zero);
+                    }
                     var woke = Win.MsgWaitForMultipleObjects(1, handles, false, TickMs, 0x04FF /* QS_ALLINPUT */);
                     if (woke == 0)
                     {
@@ -343,8 +369,17 @@ public sealed partial class BridgeApi
                 }
                 if (Win.IsWindow(_game))
                 {
-                    Win.SetWindowRgn(_game, IntPtr.Zero, true);
                     Win.SetWindowLongPtr(_game, Win.GwlpHwndParent, IntPtr.Zero);
+                    if (Win.IsHungAppWindow(_game))
+                    {
+                        // A call that sends the window a message would wait on it: leave the region and frame.
+                        _host.Log.Warning("window: undocked while the window does not answer; its region and frame are left as they are");
+                    }
+                    else
+                    {
+                        Win.SetWindowRgn(_game, IntPtr.Zero, true);
+                        PutFrameBack();
+                    }
                 }
                 lock (_stateLock)
                 {
@@ -356,9 +391,34 @@ public sealed partial class BridgeApi
             }
         }
 
+        // The frame taken off at the first tick, put back around the same client place and size.
+        private void PutFrameBack()
+        {
+            if (_frameStyle is not long style)
+            {
+                return;
+            }
+            Win.GetWindowRect(_game, out var r); // a popup: its window is its client area
+            var ex = (uint)Win.GetWindowLongPtr(_game, Win.GwlExStyle).ToInt64();
+            var dpi = Win.GetDpiForWindow(_game);
+            if (!Win.AdjustWindowRectExForDpi(ref r, (uint)style, false, ex, dpi == 0 ? 96u : dpi))
+            {
+                _host.Log.Warning("window: could not size the frame to put back; the window stays without it");
+                return;
+            }
+            Win.SetWindowLongPtr(_game, Win.GwlStyle, new IntPtr(style));
+            Win.SetWindowPos(_game, IntPtr.Zero, r.L, r.T, r.R - r.L, r.B - r.T, 0x0010 | 0x0004 | 0x0020 /* NOACTIVATE | NOZORDER | FRAMECHANGED */);
+            _host.Log.Info($"window: frame put back (style 0x{style:X})");
+        }
+
         private void Release()
         {
             Win.ClipCursor(IntPtr.Zero);
+            _unclipUntil = Environment.TickCount64 + 1000;
+            // Windows lets a program that is not in front take the focus only after input of its own:
+            // a tap of Alt counts (REDcode's script found SetForegroundWindow refused without it).
+            Win.keybd_event(0x12, 0, 0, UIntPtr.Zero);
+            Win.keybd_event(0x12, 0, 2 /* KEYEVENTF_KEYUP */, UIntPtr.Zero);
             var focused = Win.SetForegroundWindow(_owner);
             _host.Log.Info($"window: release key pressed; pointer freed, focus to the owner {(focused ? "given" : "refused by Windows")}");
             Notify("window.released", new { key = _key.Text, focused });
@@ -386,6 +446,26 @@ public sealed partial class BridgeApi
                 return;
             }
 
+            // A window that does not answer: calls that send it a message (its region, its place)
+            // would wait on it, and UI Automation on the owner blocked while it was owned (REDcode's
+            // finding, #22). So clear its owner until it answers again, and touch nothing else.
+            var hung = Win.IsHungAppWindow(_game);
+            if (hung != _hung)
+            {
+                lock (_stateLock)
+                {
+                    _hung = hung;
+                }
+                Win.SetWindowLongPtr(_game, Win.GwlpHwndParent, hung ? IntPtr.Zero : _owner);
+                _host.Log.Info(hung ? "window: the window does not answer; owner cleared until it does" : "window: the window answers again; owned again");
+                Notify(hung ? "window.hung" : "window.answering", new { });
+            }
+            if (hung)
+            {
+                NoteFocus(Win.GetForegroundWindow());
+                return;
+            }
+
             // Strip the frame the game's Windowed mode adds, keeping its client size: the window is
             // never resized, so the game's picture and its pointer stay one to one.
             var style = Win.GetWindowLongPtr(_game, Win.GwlStyle).ToInt64();
@@ -395,6 +475,7 @@ public sealed partial class BridgeApi
             var framed = (style & 0x00C40000L) != 0 || (style & 0x80000000L) == 0; // WS_CAPTION | WS_THICKFRAME, or not a popup
             if (framed)
             {
+                _frameStyle ??= style;
                 Win.SetWindowLongPtr(_game, Win.GwlStyle, new IntPtr(PopupStyle));
                 Win.SetWindowPos(_game, IntPtr.Zero, place.L, place.T, gw, gh, 0x0010 | 0x0004 | 0x0020 /* NOACTIVATE | NOZORDER | FRAMECHANGED */);
                 Win.GetWindowRect(_game, out place);
@@ -405,7 +486,10 @@ public sealed partial class BridgeApi
                 Win.SetWindowLongPtr(_game, Win.GwlpHwndParent, _owner);
             }
 
-            var r = Win.IsIconic(_owner) ? null : ReadWebview();
+            var whole = Win.IsIconic(_owner) ? null : ReadWebview();
+            // The part of the webview the window may use: less the inset.
+            var r = whole is null ? null : new WinRect(whole.X + _inset.Left, whole.Y + _inset.Top,
+                whole.Width - _inset.Left - _inset.Right, whole.Height - _inset.Top - _inset.Bottom);
             var show = r is { Width: >= 8, Height: >= 8 };
             if (!show)
             {
@@ -439,16 +523,26 @@ public sealed partial class BridgeApi
                 SetShown(true, null);
             }
 
-            var focused = Win.GetForegroundWindow() == _game;
-            bool focusChanged;
             lock (_stateLock)
             {
-                _webviewRect = r;
+                _webviewRect = whole;
                 _windowRect = new WinRect(place.L, place.T, place.R - place.L, place.B - place.T);
-                focusChanged = focused != _focused;
+            }
+            NoteFocus(Win.GetForegroundWindow());
+        }
+
+        // The game has the focus when the window in front is its own, one of its process's, or, while
+        // it does not answer, Windows' stand-in for it (class Ghost, which another process owns).
+        private void NoteFocus(IntPtr front)
+        {
+            var focused = front != IntPtr.Zero && (front == _game || Win.PidOf(front) == _gamePid || (_hung && Win.ClassOf(front) == "Ghost"));
+            bool changed;
+            lock (_stateLock)
+            {
+                changed = focused != _focused;
                 _focused = focused;
             }
-            if (focusChanged)
+            if (changed)
             {
                 Notify("window.focus", new { focused });
             }
@@ -687,6 +781,10 @@ public sealed partial class BridgeApi
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
         [DllImport("user32.dll")] public static extern bool ClipCursor(IntPtr r);
+        [DllImport("user32.dll")] public static extern bool IsHungAppWindow(IntPtr h);
+        [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+        [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
+        [DllImport("user32.dll")] public static extern bool AdjustWindowRectExForDpi(ref Rect r, uint style, bool menu, uint exStyle, uint dpi);
         [DllImport("user32.dll", SetLastError = true)] public static extern bool RegisterHotKey(IntPtr h, int id, uint mods, uint vk);
         [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr h, int id);
         [DllImport("user32.dll")] public static extern bool PeekMessage(out Msg m, IntPtr h, uint min, uint max, uint remove);

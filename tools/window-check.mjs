@@ -139,16 +139,42 @@ await sleep(600);
 const released = b.notes.slice(beforeKey).find((n) => n.method === 'window.released');
 ok(!!released, 'window.released on the release key', JSON.stringify(released?.params ?? null));
 
-// Undock: owner and region cleared, left where it is.
+// Undock: owner and region cleared, the frame put back around the same client area.
 const at = (await b.call('window.find', { class: cls, pid: target.pid })).result;
 const und = (await b.call('window.undock')).result;
 ok(und && !und.docked && und.ended === 'undocked', 'window.undock', JSON.stringify(und?.ended));
+await sleep(200);
 const after = (await b.call('window.find', { class: cls, pid: target.pid })).result;
 ok(after.owner === 0, 'owner cleared');
-ok(after.rect.x === at.rect.x && after.rect.y === at.rect.y, 'left where it was');
+ok((BigInt(after.style) & 0xC00000n) !== 0n && after.clientWidth === framedClient.w && after.clientHeight === framedClient.h, 'the frame is back, with the same client size', `${after.style} ${after.clientWidth}x${after.clientHeight}`);
+ok(after.rect.x <= at.rect.x && after.rect.y <= at.rect.y && after.rect.x + after.rect.width >= at.rect.x + at.rect.width, 'the frame goes round where the window was', `${JSON.stringify(after.rect)} round ${JSON.stringify(at.rect)}`);
 
-// Dock again, then the target closes: window.lost.
-await b.call('window.dock', { class: cls, pid: target.pid, owner: { pid: owner.pid, title: 'rb22-owner' }, webview: 'rb22-webview' });
+// Dock again with an inset at the bottom: centred in the webview less the inset.
+const inset = { bottom: 120 };
+const badInset = await b.call('window.dock', { class: cls, pid: target.pid, owner: { pid: owner.pid, title: 'rb22-owner' }, webview: 'rb22-webview', inset: { left: -1 } });
+ok(badInset.error && /inset/.test(badInset.error.message), 'a negative inset is refused', badInset.error?.message);
+await b.call('window.dock', { class: cls, pid: target.pid, owner: { pid: owner.pid, title: 'rb22-owner' }, webview: 'rb22-webview', inset });
+await sleep(400);
+s = (await b.call('window.state')).result;
+found = (await b.call('window.find', { class: cls, pid: target.pid })).result;
+const iy = s.webviewRect.y + Math.floor((s.webviewRect.height - 120 - found.rect.height) / 2);
+ok(s.inset?.bottom === 120 && Math.abs(found.rect.y - iy) <= 1, 'centred above the inset', `y ${found.rect.y} vs ${iy}, inset ${JSON.stringify(s.inset)}`);
+
+// The target stops answering: its owner is cleared until it answers again.
+const beforeHang = b.notes.length;
+target.send({ hang: 9000 });
+await sleep(7000);
+s = (await b.call('window.state')).result;
+found = (await b.call('window.find', { class: cls, pid: target.pid })).result;
+ok(s.hung && found.owner === 0, 'a window that does not answer is hung, its owner cleared', `hung ${s.hung}, owner ${found.owner}`);
+ok(b.notes.slice(beforeHang).some((n) => n.method === 'window.hung'), 'window.hung sent');
+await sleep(3500);
+s = (await b.call('window.state')).result;
+found = (await b.call('window.find', { class: cls, pid: target.pid })).result;
+ok(!s.hung && found.owner !== 0, 'answering again: owned again', `hung ${s.hung}, owner ${found.owner}`);
+ok(b.notes.slice(beforeHang).some((n) => n.method === 'window.answering'), 'window.answering sent');
+
+// The target closes: window.lost.
 await sleep(300);
 const beforeLost = b.notes.length;
 target.send({ quit: true });

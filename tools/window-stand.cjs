@@ -25,6 +25,7 @@ app.whenReady().then(() => {
       if (m.move) win.setPosition(m.move[0], m.move[1]);
       if (m.page) page(m.page);
       if (m.quit) app.quit();
+      if (m.hang) { const end = Date.now() + m.hang; while (Date.now() < end) { /* the main thread stops answering */ } }
     }
   }, 100);
 });
