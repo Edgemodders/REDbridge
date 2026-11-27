@@ -280,6 +280,17 @@ def main():
         mine = step("sector.find (sources: project)", lambda: b.call("sector.find", sources=["project"], project=os.path.join(out, "project")))
         assert mine["total"] >= 1 and all(s["source"] == "project" and s["archive"] for s in mine["sectors"]), mine
 
+    # Occluder copies, a box per copy and where each box came from (issue #25, from REDcode's sector overlaps).
+    D = "base\\worlds\\03_night_city\\_compiled\\default\\"
+    kn = step("sector.nodes exterior_-11_11_0_1 (bounds: occluder 899)", lambda: next(i for i in b.call("sector.nodes", path=D + "exterior_-11_11_0_1.streamingsector", bounds=True)["items"] if i["index"] == 899))
+    assert kn["kind"] == "worldInstancedOccluderNode" and len(kn["instances"]) == 2 and kn["boundsFrom"] == "copies", kn
+    assert abs(kn["instances"][0]["position"][0] + 1281.993) < 0.01 and len(kn["instanceBounds"]) == 2, kn["instances"]
+    # Copy 0's matrix: x axis (-0.2845, 0.0275, 0), y axis (-0.3086, -3.1979, 0), z axis (0, 0, 8), place (-1281.993, 1524.8115, 25.462); mesh box +-0.001, +-0.5, +-0.5.
+    assert all(abs(a - b2) < 0.01 for a, b2 in zip(kn["instanceBounds"][0]["min"] + kn["instanceBounds"][0]["max"], [-1282.1476, 1523.2125, 21.462, -1281.8384, 1526.4105, 29.462])), kn["instanceBounds"][0]
+    occ = [i for i in b.call("sector.nodes", path=D + "exterior_-3_2_0_3.streamingsector", bounds=True)["items"] if i["kind"] == "worldInstancedOccluderNode"]
+    assert len(occ) == 117 and all(i["instances"] and i["bounds"] and not all(abs(v) < 1e-4 for v in i["bounds"]["min"]) for i in occ), [i for i in occ if not i["bounds"]][:2]
+    print(f"   exterior_-3_2_0_3: 117 occluders, {sum(len(i['instances']) for i in occ)} copies, none boxed at the origin")
+
     # cr2w inside parsed buffers (issue #24, from REDcode): an instanced mesh node's inner nodes and its transforms.
     kab = "base\\worlds\\03_night_city\\_compiled\\default\\exterior_-11_11_0_1.streamingsector"
     kdoc = b.call("cr2w.open", path=kab)["doc"]

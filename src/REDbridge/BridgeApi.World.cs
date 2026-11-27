@@ -249,8 +249,14 @@ public sealed partial class BridgeApi
     /// is known (the sector's own list, or WolvenKit's), <see cref="Hash"/> its global node id
     /// (2.5's <c>globalNodeId.hash</c>; null when 0). <see cref="Resource"/> is the mesh, entity
     /// template, decal material or effect it shows; <see cref="ResourceHash"/> the resource's hash
-    /// when its path is not known. <see cref="Instances"/> is set for instanced meshes: one world
-    /// placement per copy. <see cref="Bounds"/> is a world box, when it was cheap to get or asked for.
+    /// when its path is not known. <see cref="Instances"/> is set for nodes that keep their places in
+    /// a buffer (instanced meshes, instanced destructible meshes, instanced occluders): one world
+    /// placement per copy. <see cref="Bounds"/> is a world box, when it was cheap to get or asked for,
+    /// and <see cref="BoundsFrom"/> says where it came from (issue #25): <c>group</c> the box the
+    /// sector keeps for an instanced mesh's copies, <c>copies</c> the copies' mesh boxes together,
+    /// <c>mesh</c> the mesh's box at the entry's place, <c>node</c> the node's own world box, <c>none</c>
+    /// no box. With <c>bounds</c>, <see cref="InstanceBounds"/> holds each copy's world box, in the
+    /// order of <see cref="Instances"/>, when the mesh's box could be read.
     /// </summary>
     public sealed record NodeEntry(
         int Index,
@@ -265,7 +271,9 @@ public sealed partial class BridgeApi
         IReadOnlyList<Placement>? Instances,
         NodeStreaming Streaming,
         Bounds? Bounds,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Range = null);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Range = null,
+        string BoundsFrom = "none",
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<Bounds>? InstanceBounds = null);
 
     /// <summary>
     /// With <c>ranges</c>, <see cref="BaseRange"/> is the range of entries every variant keeps (the
@@ -365,23 +373,49 @@ public sealed partial class BridgeApi
             var place = PlacementOf(e);
             List<Placement>? instances = null;
             Bounds? world = null;
+            var from = "none";
             if (node is worldInstancedMeshNode im)
             {
                 (instances, world) = InstancesOf(im, inner, place, warnings, i);
+                if (world is not null)
+                {
+                    from = "group";
+                }
             }
             else if (node is worldInstancedDestructibleMeshNode idm)
             {
                 instances = idm.InstanceTransforms.Select(t => Compose(place, new Placement([t.Position.X, t.Position.Y, t.Position.Z], [t.Orientation.I, t.Orientation.J, t.Orientation.K, t.Orientation.R], [1, 1, 1]))).ToList();
             }
-            if (bounds && world is null && resourcePath is not null && resourcePath.EndsWith(".mesh", StringComparison.OrdinalIgnoreCase))
+            else if (node is worldInstancedOccluderNode occ)
+            {
+                instances = OccluderCopies(occ, place, warnings, i);
+            }
+            List<Bounds>? copyBoxes = null;
+            if (bounds && resourcePath is not null && IsMeshPath(resourcePath) && (world is null || instances is { Count: > 0 }))
             {
                 var local = MeshBoundsOf(resourcePath, mods);
                 if (local is not null)
                 {
-                    world = instances is { Count: > 0 }
-                        ? instances.Select(p => WorldBounds(local, ToSceneTransform(p))).Aggregate(Union)
-                        : WorldBounds(local, ToSceneTransform(place));
+                    if (instances is { Count: > 0 })
+                    {
+                        copyBoxes = instances.Select(p => WorldBounds(local, ToSceneTransform(p))).ToList();
+                        if (world is null)
+                        {
+                            world = copyBoxes.Aggregate(Union);
+                            from = "copies";
+                        }
+                    }
+                    else if (instances is null)
+                    {
+                        world = WorldBounds(local, ToSceneTransform(place));
+                        from = "mesh";
+                    }
                 }
+            }
+            if (world is null && node is worldInstancedOccluderNode { WorldBounds: var wb } && wb.Max.X >= wb.Min.X)
+            {
+                world = BoundsOf(wb);
+                from = "node";
             }
 
             items.Add(new NodeEntry(
@@ -397,7 +431,9 @@ public sealed partial class BridgeApi
                 instances,
                 new NodeStreaming(e.StreamingDistance, e.SecondaryRefPointDistance >= float.MaxValue ? null : e.SecondaryRefPointDistance),
                 world,
-                ranges ? RangeOf(i) : null));
+                ranges ? RangeOf(i) : null,
+                from,
+                copyBoxes));
         }
         return ranges
             ? new SectorNodes(name, KindOf(sector.Category), sector.Level, sector.Nodes.Count, items.Count, items, warnings, (int)sector.PersisentNodeIndex, Math.Max(starts.Count, 1))
@@ -519,6 +555,103 @@ public sealed partial class BridgeApi
             }
         }
         return (list, box);
+    }
+
+    private static bool IsMeshPath(string path) =>
+        path.EndsWith(".mesh", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".w2mesh", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// An instanced occluder's copies (issue #25). Its buffer keeps one matrix per copy, row vectors:
+    /// the first three rows are the copy's x, y and z axes with its scale in their lengths, the fourth
+    /// its place. In the game's sectors the entry stands at the origin and the places are in world
+    /// space; each copy is still placed relative to the entry, as instanced meshes' are (an entry
+    /// away from the origin is unverified). A matrix whose axes are not square to each other loses
+    /// its shear and is named in the warnings.
+    /// </summary>
+    private static List<Placement> OccluderCopies(worldInstancedOccluderNode node, Placement entry, List<string> warnings, int index)
+    {
+        var list = new List<Placement>(node.Buffer.Count);
+        var sheared = false;
+        foreach (var m in node.Buffer)
+        {
+            double[] ax = [m.Unknown1.X, m.Unknown1.Y, m.Unknown1.Z];
+            double[] ay = [m.Unknown2.X, m.Unknown2.Y, m.Unknown2.Z];
+            double[] az = [m.Unknown3.X, m.Unknown3.Y, m.Unknown3.Z];
+            double sx = Length(ax), sy = Length(ay), sz = Length(az);
+            if (sx == 0 || sy == 0 || sz == 0)
+            {
+                warnings.Add($"entry {index}: an occluder copy with a flat axis was left out");
+                continue;
+            }
+            for (var k = 0; k < 3; k++)
+            {
+                ax[k] /= sx;
+                ay[k] /= sy;
+                az[k] /= sz;
+            }
+            if (Math.Abs(Dot(ax, ay)) > 1e-3 || Math.Abs(Dot(ax, az)) > 1e-3 || Math.Abs(Dot(ay, az)) > 1e-3)
+            {
+                sheared = true;
+            }
+            // A mirrored copy: keep a proper rotation and carry the mirror in the z scale.
+            if (Dot(Cross(ax, ay), az) < 0)
+            {
+                sz = -sz;
+                for (var k = 0; k < 3; k++)
+                {
+                    az[k] = -az[k];
+                }
+            }
+            var local = new Placement(
+                [m.Unknown4.X, m.Unknown4.Y, m.Unknown4.Z],
+                QuaternionOf(ax, ay, az),
+                [(float)sx, (float)sy, (float)sz]);
+            list.Add(Compose(entry, local));
+        }
+        if (sheared)
+        {
+            warnings.Add($"entry {index}: an occluder copy's axes are not square to each other; its shear is left out");
+        }
+        return list;
+    }
+
+    private static double Length(double[] v) => Math.Sqrt(Dot(v, v));
+
+    private static double Dot(double[] a, double[] b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+    private static double[] Cross(double[] a, double[] b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+    /// <summary>The unit quaternion (x y z w) of the rotation taking the local x, y and z axes to <paramref name="ax"/>, <paramref name="ay"/> and <paramref name="az"/>.</summary>
+    private static float[] QuaternionOf(double[] ax, double[] ay, double[] az)
+    {
+        // The matrix's columns are the axes: m[row, col].
+        double m00 = ax[0], m10 = ax[1], m20 = ax[2];
+        double m01 = ay[0], m11 = ay[1], m21 = ay[2];
+        double m02 = az[0], m12 = az[1], m22 = az[2];
+        double x, y, z, w;
+        var trace = m00 + m11 + m22;
+        if (trace > 0)
+        {
+            var s = Math.Sqrt(trace + 1) * 2;
+            w = s / 4; x = (m21 - m12) / s; y = (m02 - m20) / s; z = (m10 - m01) / s;
+        }
+        else if (m00 > m11 && m00 > m22)
+        {
+            var s = Math.Sqrt(1 + m00 - m11 - m22) * 2;
+            w = (m21 - m12) / s; x = s / 4; y = (m01 + m10) / s; z = (m02 + m20) / s;
+        }
+        else if (m11 > m22)
+        {
+            var s = Math.Sqrt(1 + m11 - m00 - m22) * 2;
+            w = (m02 - m20) / s; x = (m01 + m10) / s; y = s / 4; z = (m12 + m21) / s;
+        }
+        else
+        {
+            var s = Math.Sqrt(1 + m22 - m00 - m11) * 2;
+            w = (m10 - m01) / s; x = (m02 + m20) / s; y = (m12 + m21) / s; z = s / 4;
+        }
+        var n = Math.Sqrt(x * x + y * y + z * z + w * w);
+        return [(float)(x / n), (float)(y / n), (float)(z / n), (float)(w / n)];
     }
 
     /// <summary>A placement inside a parent: scale, then rotate, then move by the parent.</summary>

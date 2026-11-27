@@ -12,6 +12,10 @@ How to keep it:
 
 ## Unreleased
 
+### New
+
+- **Occluder copies and a box per copy in `sector.nodes`** (issue #25: https://github.com/Edgemodders/REDbridge/issues/25), for REDcode's sector overlaps. A `worldInstancedOccluderNode`'s copies now come back in `instances`, read from the matrices in its buffer (one per copy: its axes with their scale, and its place), and with `bounds: true` its box covers them. Before, such a node got one box at its entry's place, the origin, which stretched a sector's box by more than a kilometre. With `bounds: true`, every node with copies (instanced meshes, instanced destructible meshes, occluders) also gets `instanceBounds`, each copy's mesh box at its place, in the order of `instances`. Every entry now says where its box came from in `boundsFrom`: `group` (the box the sector keeps for an instanced mesh's copies), `copies` (the copies' mesh boxes together), `mesh` (the mesh's box at the entry's place), `node` (the node's own world box) or `none`. A `.w2mesh` resource now gives a box too.
+
 ## 0.20.0 (2026-11-26)
 
 ### New
